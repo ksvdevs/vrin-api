@@ -3,9 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\RegistrarExpedienteRequest;
-use App\Http\Requests\SubirCartaDocenteRequest;
+use App\Http\Requests\SubirArchivoRequest;
 use App\Http\Resources\ExpedienteResource;
 use App\Models\Archivo;
+use App\Models\DocumentoGenerado;
 use App\Models\Expediente;
 use App\Services\ExpedienteService;
 use App\Services\ExpedienteWorkflow;
@@ -52,8 +53,8 @@ class ExpedienteController extends Controller
         return ExpedienteResource::collection($expedientes->paginate(5));
     }
 
-    // Fase 3 — Detalle: expediente + etapas + archivos + observaciones.
-    public function show(Expediente $expediente)
+    // Fase 4 — Detalle: expediente + etapas + archivos + observaciones.
+    public function show(Request $request, Expediente $expediente)
     {
         $this->authorize('view', $expediente);
 
@@ -87,8 +88,14 @@ class ExpedienteController extends Controller
             'badge' => EstadoExpediente::badge($expediente->estado),
             'etapa_actual' => $expediente->etapa_actual,
             'documentos_completos' => $expediente->documentos_completos,
+            'transiciones_disponibles' => app(ExpedienteWorkflow::class)->transicionesDisponibles(
+                $expediente,
+                $request->user(),
+            ),
             'carta_docente_numero' => $expediente->carta_docente_numero,
             'carta_docente_fecha' => $expediente->carta_docente_fecha?->format('Y-m-d'),
+            'registro_mp_numero' => $expediente->registro_mp_numero,
+            'cerrado_at' => $expediente->cerrado_at?->format('Y-m-d H:i:s'),
             'fecha_registro' => $expediente->created_at?->format('d/m/Y'),
             'docente' => $docente ? [
                 'id' => $docente->id,
@@ -181,6 +188,81 @@ class ExpedienteController extends Controller
                 'resuelta_at' => $observacion->resuelta_at?->format('Y-m-d H:i:s'),
                 'created_at' => $observacion->created_at?->format('Y-m-d H:i:s'),
             ])->values(),
+            'documentos_generados' => $expediente->documentosGenerados()
+                ->with('plantilla:id,codigo,version')
+                ->orderByDesc('id')
+                ->get()
+                ->map(fn ($documento) => [
+                    'id' => $documento->id,
+                    'tipo' => $documento->tipo,
+                    'version' => $documento->version,
+                    'pdf_path' => $documento->pdf_path,
+                    'es_vigente' => $documento->es_vigente,
+                    'generado_at' => $documento->generado_at?->format('Y-m-d H:i:s'),
+                    'plantilla' => $documento->plantilla ? [
+                        'codigo' => $documento->plantilla->codigo,
+                        'version' => $documento->plantilla->version,
+                    ] : null,
+                ])->values(),
+        ]);
+    }
+
+    // Fase 6 — Descarga/preview de un documento generado (DOCX siempre
+    // attachment; PDF inline salvo ?descargar=1; 404 si aún no existe el PDF).
+    public function documento(Request $request, Expediente $expediente, DocumentoGenerado $documentoGenerado)
+    {
+        $this->authorize('view', $expediente);
+
+        abort_unless($documentoGenerado->expediente_id === $expediente->id, 404);
+
+        $formato = $request->validate(['formato' => ['nullable', 'in:pdf,docx']])['formato'] ?? 'pdf';
+
+        if ($formato === 'docx') {
+            return $this->respuestaArchivo(
+                storage_path('app/'.$documentoGenerado->docx_path),
+                basename($documentoGenerado->docx_path),
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                true
+            );
+        }
+
+        if ($documentoGenerado->pdf_path === null) {
+            abort(404, 'El PDF aún no está disponible (conversión en curso).');
+        }
+
+        return $this->respuestaArchivo(
+            storage_path('app/'.$documentoGenerado->pdf_path),
+            basename($documentoGenerado->pdf_path),
+            'application/pdf',
+            $request->boolean('descargar')
+        );
+    }
+
+    private function respuestaArchivo(string $ruta, string $nombre, string $mime, bool $descargar)
+    {
+        abort_unless(is_file($ruta), 404, 'El archivo no se encuentra en el almacenamiento.');
+
+        $respuesta = new BinaryFileResponse($ruta);
+        $respuesta->headers->set('Content-Type', $mime);
+        $respuesta->headers->set('Content-Disposition', $respuesta->headers->makeDisposition(
+            $descargar ? ResponseHeaderBag::DISPOSITION_ATTACHMENT : ResponseHeaderBag::DISPOSITION_INLINE,
+            $nombre
+        ));
+
+        return $respuesta;
+    }
+
+    // Fase 4 — Subsanación (RN-12): OBSERVADO → EN_REVISION_CALIDAD vía workflow.
+    public function marcarDocumentosCompletos(Request $request, Expediente $expediente, ExpedienteWorkflow $workflow)
+    {
+        $this->authorize('subsanar', $expediente);
+
+        $workflow->transicionar($expediente, 'EN_REVISION_CALIDAD', $request->user());
+
+        return response()->json([
+            'id' => $expediente->id,
+            'estado' => $expediente->estado,
+            'documentos_completos' => $expediente->documentos_completos,
         ]);
     }
 
@@ -221,27 +303,58 @@ class ExpedienteController extends Controller
         return response()->json($resultado['expediente'], 201);
     }
 
-    // Fase 4 — Subsanación (RN-12): OBSERVADO → EN_REVISION_CALIDAD vía workflow.
-    public function marcarDocumentosCompletos(Request $request, Expediente $expediente, ExpedienteWorkflow $workflow)
+    public function update(RegistrarExpedienteRequest $request, Expediente $expediente)
     {
-        $this->authorize('marcarDocumentosCompletos', $expediente);
+        $this->authorize('update', $expediente);
 
-        $expediente = $workflow->marcarDocumentosCompletos($expediente, $request->user());
+        $datos = $request->validated();
+        $docente = \App\Models\Docente::findOrFail($datos['docente_id']);
 
-        return response()->json([
-            'id' => $expediente->id,
-            'codigo' => $expediente->codigo,
-            'estado' => $expediente->estado,
-            'documentos_completos' => $expediente->documentos_completos,
-        ]);
+        \Illuminate\Support\Facades\DB::transaction(function () use ($expediente, $datos, $docente) {
+            $updateData = [
+                'docente_id' => $docente->id,
+                'grado' => $docente->grado,
+                'tipo_contrato' => $docente->tipo_contrato,
+                'escuela_id' => $docente->escuela_id,
+                'carta_docente_numero' => $datos['carta_docente_numero'],
+                'carta_docente_fecha' => $datos['carta_docente_fecha'],
+            ];
+
+            if (in_array($expediente->estado, [EstadoExpediente::OBSERVADO, EstadoExpediente::EN_REVISION_CALIDAD])) {
+                $updateData['documentos_completos'] = $datos['documentos_completos'];
+                $updateData['estado'] = $datos['documentos_completos'] ? EstadoExpediente::EN_REVISION_CALIDAD : EstadoExpediente::OBSERVADO;
+            }
+
+            $expediente->update($updateData);
+
+            $expediente->articulo()->update([
+                'titulo' => $datos['titulo'],
+                'revista' => $datos['revista'],
+                'base_indexadora' => $datos['base_indexadora'],
+                'cuartil' => $datos['cuartil'],
+                'monto_solicitado' => $datos['monto_solicitado'],
+                'doi' => $datos['doi'] ?? null,
+            ]);
+        });
+
+        return new ExpedienteResource($expediente->fresh(['docente.escuela.facultad', 'articulo']));
+    }
+
+    public function destroy(Request $request, Expediente $expediente)
+    {
+        $this->authorize('delete', $expediente);
+        $expediente->delete(); // Soft delete
+        return response()->noContent();
     }
 
     // Etapa 1: subida de la carta del docente (multipart/form-data, campo `archivo`).
-    public function subirArchivo(SubirCartaDocenteRequest $request, Expediente $expediente)
+    public function subirArchivo(SubirArchivoRequest $request, Expediente $expediente)
     {
         $this->authorize('subirArchivo', $expediente);
 
         $archivoSubido = $request->file('archivo');
+        $tipo = $request->validated('tipo') ?? 'CARTA_DOCENTE';
+        $etapa = $request->validated('etapa') ?? SubirArchivoRequest::ETAPA_POR_TIPO[$tipo];
 
         // Metadatos ANTES del move(): el temporal desaparece al moverlo.
         $sha256 = hash_file('sha256', $archivoSubido->getRealPath());
@@ -250,19 +363,23 @@ class ExpedienteController extends Controller
         $nombreOriginal = $archivoSubido->getClientOriginalName();
 
         $nombreUnico = sprintf(
-            'carta_%s_%s.%s',
+            '%s_%s_%s.%s',
+            strtolower($tipo),
             now()->format('YmdHis'),
             Str::random(8),
             strtolower($archivoSubido->getClientOriginalExtension())
         );
 
         $rutaRelativa = "expedientes/{$expediente->id}/{$nombreUnico}";
+        if (! is_dir(storage_path("app/expedientes/{$expediente->id}"))) {
+            mkdir(storage_path("app/expedientes/{$expediente->id}"), 0755, true);
+        }
         // RN-03: los archivos jamás se borran físicamente.
         $archivoSubido->move(storage_path("app/expedientes/{$expediente->id}"), $nombreUnico);
 
         $archivo = $expediente->archivos()->create([
-            'tipo' => 'CARTA_DOCENTE',
-            'etapa' => 1,
+            'tipo' => $tipo,
+            'etapa' => $etapa,
             'subido_por' => $request->user()->id,
             'nombre_original' => $nombreOriginal,
             'storage_path' => $rutaRelativa,

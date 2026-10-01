@@ -5,11 +5,11 @@ namespace App\Services;
 use App\Models\Auditoria;
 
 /**
- * Registro de auditoría (append-only, tabla `auditoria` sin FKs, D-20).
+ * Registro de auditoría (append-only, tabla `auditoria` sin FKs).
  *
- * Escritor de bajo nivel: lo invoca el listener `EscribirAuditoria` cuando se
- * dispara un evento de dominio. Ningún controlador ni servicio de negocio lo
- * usa directamente.
+ * Único punto de escritura de la tabla (D-20): solo los listeners de
+ * eventos de dominio (app/Listeners) lo invocan. El sello `created_at` se
+ * fija aquí con precisión de milisegundos (la columna es DATETIME(3)).
  */
 class AuditoriaService
 {
@@ -30,6 +30,7 @@ class AuditoriaService
             'antes' => $contexto['antes'] ?? null,
             'despues' => $contexto['despues'] ?? null,
             'ip' => $contexto['ip'] ?? request()?->ip(),
+            'created_at' => now()->format('Y-m-d H:i:s.v'),
         ]);
     }
 }

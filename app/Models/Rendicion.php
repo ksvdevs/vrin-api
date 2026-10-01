@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\PlazoRendicionService;
 use Illuminate\Database\Eloquent\Model;
 
 class Rendicion extends Model
@@ -22,6 +23,17 @@ class Rendicion extends Model
         'cerrada_por',
         'cerrada_at',
     ];
+
+    protected $appends = ['dias_habiles_restantes'];
+
+    public function getDiasHabilesRestantesAttribute(): int
+    {
+        if ($this->estado === 'PRESENTADA') {
+            return 0;
+        }
+
+        return app(PlazoRendicionService::class)->diasHabilesRestantes($this);
+    }
 
     protected function casts(): array
     {

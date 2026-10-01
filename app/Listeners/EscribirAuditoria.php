@@ -2,73 +2,87 @@
 
 namespace App\Listeners;
 
-use App\Events\DocumentoGenerado;
+use App\Events\DocumentoGeneradoCreado;
 use App\Events\EstadoCambiado;
-use App\Events\ExpedienteCreado;
+use App\Events\ExpedienteRegistrado;
 use App\Events\PlantillaSeleccionada;
 use App\Services\AuditoriaService;
 
 /**
- * Punto central de auditoría (D-20): ningún controlador ni servicio escribe
- * en `auditoria` directamente; todo evento de dominio pasa por aquí.
+ * Auditoría central (D-20): único puente entre los eventos de dominio y la
+ * tabla `auditoria` (append-only). Nadie más escribe en esa tabla.
  */
 class EscribirAuditoria
 {
-    public function __construct(private AuditoriaService $auditoria) {}
+    public function __construct(private readonly AuditoriaService $auditoria) {}
 
-    public function handleExpedienteCreado(ExpedienteCreado $evento): void
+    public function handle(EstadoCambiado|ExpedienteRegistrado|PlantillaSeleccionada|DocumentoGeneradoCreado $evento): void
     {
-        $this->auditoria->registrar('expediente.creado', [
+        if ($evento instanceof DocumentoGeneradoCreado) {
+            $this->auditoria->registrar('documento.generado', [
+                'expediente_id' => $evento->documento->expediente_id,
+                'usuario_id' => $evento->actor->id,
+                'entidad' => 'documentos_generados',
+                'entidad_id' => $evento->documento->id,
+                'despues' => [
+                    'tipo' => $evento->documento->tipo,
+                    'version' => $evento->documento->version,
+                    'plantilla_id' => $evento->documento->plantilla_id,
+                    'sha256' => $evento->documento->sha256,
+                ],
+            ]);
+
+            return;
+        }
+
+        if ($evento instanceof PlantillaSeleccionada) {
+            $this->auditoria->registrar('plantilla.seleccionada', [
+                'usuario_id' => $evento->actor->id,
+                'entidad' => 'plantilla_seleccionada',
+                'entidad_id' => $evento->plantillaId,
+                'despues' => [
+                    'modulo' => $evento->modulo,
+                    'tipo_documento_id' => $evento->tipoDocumentoId,
+                    'plantilla_id' => $evento->plantillaId,
+                ],
+            ]);
+
+            return;
+        }
+
+        if ($evento instanceof ExpedienteRegistrado) {
+            $this->auditoria->registrar('expediente.creado', [
+                'expediente_id' => $evento->expediente->id,
+                'usuario_id' => $evento->usuario->id,
+                'entidad' => 'expedientes',
+                'entidad_id' => $evento->expediente->id,
+                'despues' => [
+                    'codigo' => $evento->expediente->codigo,
+                    'estado' => $evento->expediente->estado,
+                    'docente_id' => $evento->expediente->docente_id,
+                ],
+            ]);
+
+            return;
+        }
+
+        $this->auditoria->registrar('estado.cambiado', [
             'expediente_id' => $evento->expediente->id,
             'usuario_id' => $evento->actor->id,
             'entidad' => 'expedientes',
             'entidad_id' => $evento->expediente->id,
-            'despues' => [
-                'rol' => $evento->actor->rol,
-                'codigo' => $evento->expediente->codigo,
-                'estado' => $evento->expediente->estado,
-                'docente_id' => $evento->expediente->docente_id,
-            ],
+            'antes' => ['estado' => $evento->origen],
+            'despues' => ['estado' => $evento->destino],
         ]);
-    }
 
-    public function handleEstadoCambiado(EstadoCambiado $evento): void
-    {
-        $this->auditoria->registrar($evento->accion, [
-            'expediente_id' => $evento->expediente->id,
-            'usuario_id' => $evento->actor->id,
-            'entidad' => 'expedientes',
-            'entidad_id' => $evento->expediente->id,
-            'antes' => $evento->antes,
-            'despues' => ['rol' => $evento->actor->rol] + $evento->despues,
-        ]);
-    }
-
-    public function handlePlantillaSeleccionada(PlantillaSeleccionada $evento): void
-    {
-        $this->auditoria->registrar('plantilla.seleccionada', [
-            'usuario_id' => $evento->actor->id,
-            'entidad' => 'plantilla_seleccionada',
-            'entidad_id' => $evento->tipoDocumentoId,
-            'antes' => $evento->antes,
-            'despues' => ['rol' => $evento->actor->rol] + $evento->despues,
-        ]);
-    }
-
-    public function handleDocumentoGenerado(DocumentoGenerado $evento): void
-    {
-        $this->auditoria->registrar('documento.generado', [
-            'expediente_id' => $evento->expediente->id,
-            'usuario_id' => $evento->actor->id,
-            'entidad' => 'documentos_generados',
-            'entidad_id' => $evento->documento->id,
-            'despues' => [
-                'rol' => $evento->actor->rol,
-                'tipo' => $evento->documento->tipo,
-                'version' => $evento->documento->version,
-                'plantilla_id' => $evento->documento->plantilla_id,
-                'docx_path' => $evento->documento->docx_path,
-            ],
-        ]);
+        if (isset($evento->payload['validacion'])) {
+            $this->auditoria->registrar('expediente.validacion_calidad', [
+                'expediente_id' => $evento->expediente->id,
+                'usuario_id' => $evento->actor->id,
+                'entidad' => 'validaciones_calidad',
+                'entidad_id' => $evento->expediente->id,
+                'despues' => $evento->payload['validacion'],
+            ]);
+        }
     }
 }

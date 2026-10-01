@@ -2,17 +2,16 @@
 
 namespace App\Events;
 
+use App\Models\Expediente;
 use App\Models\Usuario;
 use Illuminate\Foundation\Events\Dispatchable;
 
-class PlantillaSeleccionada
+class ExpedienteRegistrado
 {
     use Dispatchable;
 
     public function __construct(
-        public string $modulo,
-        public int $tipoDocumentoId,
-        public int $plantillaId,
-        public Usuario $actor,
+        public Expediente $expediente,
+        public Usuario $usuario,
     ) {}
 }

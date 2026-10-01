@@ -7,41 +7,37 @@ use App\Models\Usuario;
 
 class PlantillaPolicy
 {
-    private const ROL_ADMINISTRADOR = 'ADMINISTRADOR';
-
-    private const ROLES_LECTURA = ['ADMINISTRADOR', 'SECRETARIA', 'CALIDAD'];
+    // La gestión de plantillas y su selección son exclusivas del administrador.
+    private const ROL_GESTOR = 'ADMINISTRADOR';
 
     public function viewAny(Usuario $user): bool
     {
-        return in_array($user->rol, self::ROLES_LECTURA, true);
+        return $user->rol === self::ROL_GESTOR;
     }
 
     public function view(Usuario $user, Plantilla $plantilla): bool
     {
-        return in_array($user->rol, self::ROLES_LECTURA, true);
+        return $user->rol === self::ROL_GESTOR;
     }
 
     public function create(Usuario $user): bool
     {
-        return $user->rol === self::ROL_ADMINISTRADOR;
+        return $user->rol === self::ROL_GESTOR;
     }
 
     public function update(Usuario $user, Plantilla $plantilla): bool
     {
-        return $user->rol === self::ROL_ADMINISTRADOR;
+        return $user->rol === self::ROL_GESTOR;
     }
 
     public function delete(Usuario $user, Plantilla $plantilla): bool
     {
-        return $user->rol === self::ROL_ADMINISTRADOR;
+        return $user->rol === self::ROL_GESTOR;
     }
 
-    /**
-     * HU-41 / RN-13: elegir la plantilla vigente de un módulo/tipo es
-     * exclusivo del Administrador.
-     */
+    // Selección vigente por módulo/tipo (RN-13, HU-41).
     public function seleccionar(Usuario $user): bool
     {
-        return $user->rol === self::ROL_ADMINISTRADOR;
+        return $user->rol === self::ROL_GESTOR;
     }
 }

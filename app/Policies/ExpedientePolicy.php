@@ -23,6 +23,71 @@ class ExpedientePolicy
         return in_array($user->rol, self::ROLES_CONSULTA, true);
     }
 
+    // Validación de requisitos: exclusivo de Calidad (RN-01). Las
+    // precondiciones de estado/documentos las valida el workflow (409).
+    public function validarRequisitos(Usuario $user, Expediente $expediente): bool
+    {
+        return $user->rol === 'CALIDAD';
+    }
+
+    // Subsanación de un expediente observado (RN-12).
+    public function subsanar(Usuario $user, Expediente $expediente): bool
+    {
+        return in_array($user->rol, self::ROLES_REGISTRO, true);
+    }
+
+    // Fase 6 — Generar Carta VRIN→OPP y registrar la respuesta OPP (SEC/ADMIN).
+    public function generarCarta(Usuario $user, Expediente $expediente): bool
+    {
+        return in_array($user->rol, self::ROLES_REGISTRO, true);
+    }
+
+    public function registrarOpp(Usuario $user, Expediente $expediente): bool
+    {
+        return in_array($user->rol, self::ROLES_REGISTRO, true);
+    }
+
+    // Sugerencia del siguiente número de carta del año (RN-10): SEC/ADMIN.
+    public function sugerirCarta(Usuario $user): bool
+    {
+        return in_array($user->rol, self::ROLES_REGISTRO, true);
+    }
+
+    public function generarResolucion(Usuario $user, Expediente $expediente): bool
+    {
+        return in_array($user->rol, self::ROLES_REGISTRO, true);
+    }
+
+    public function sugerirResolucion(Usuario $user): bool
+    {
+        return in_array($user->rol, self::ROLES_REGISTRO, true);
+    }
+
+    public function anularDocumento(Usuario $user, Expediente $expediente): bool
+    {
+        return in_array($user->rol, self::ROLES_REGISTRO, true);
+    }
+
+    public function registrarDesembolso(Usuario $user, Expediente $expediente): bool
+    {
+        return in_array($user->rol, self::ROLES_REGISTRO, true);
+    }
+
+    public function actualizarFechaLimite(Usuario $user, Expediente $expediente): bool
+    {
+        return in_array($user->rol, self::ROLES_REGISTRO, true);
+    }
+
+    public function actualizarDoi(Usuario $user, Expediente $expediente): bool
+    {
+        return in_array($user->rol, self::ROLES_REGISTRO, true);
+    }
+
+    public function cerrarRendicion(Usuario $user, Expediente $expediente): bool
+    {
+        return in_array($user->rol, self::ROLES_REGISTRO, true);
+    }
+
     public function create(Usuario $user): bool
     {
         return in_array($user->rol, self::ROLES_REGISTRO, true);
@@ -33,16 +98,12 @@ class ExpedientePolicy
         return in_array($user->rol, self::ROLES_REGISTRO, true);
     }
 
-    // RN-01: validar requisitos es exclusivo de Calidad. La precondición
-    // documentos_completos (RN-12) la controla el workflow como 409, para que
-    // un OBSERVADO reciba un mensaje de estado claro y no un 403 genérico.
-    public function validarRequisitos(Usuario $user, Expediente $expediente): bool
+    public function update(Usuario $user, Expediente $expediente): bool
     {
-        return $user->rol === 'CALIDAD';
+        return in_array($user->rol, self::ROLES_REGISTRO, true);
     }
 
-    // Subsanación (RN-12): Secretaría/Admin completa los documentos de un OBSERVADO.
-    public function marcarDocumentosCompletos(Usuario $user, Expediente $expediente): bool
+    public function delete(Usuario $user, Expediente $expediente): bool
     {
         return in_array($user->rol, self::ROLES_REGISTRO, true);
     }

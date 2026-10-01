@@ -1,11 +1,16 @@
 <?php
 
+use App\Http\Controllers\CartaVrinController;
 use App\Http\Controllers\DocenteController;
+use App\Http\Controllers\DocumentoGeneradoController;
 use App\Http\Controllers\EscuelaController;
 use App\Http\Controllers\ExpedienteController;
 use App\Http\Controllers\FacultadController;
 use App\Http\Controllers\PlantillaController;
 use App\Http\Controllers\PlantillaSeleccionController;
+use App\Http\Controllers\RendicionController;
+use App\Http\Controllers\ResolucionController;
+use App\Http\Controllers\RespuestaOppController;
 use App\Http\Controllers\ValidacionController;
 use App\Http\Middleware\DevRoleAuthMiddleware;
 use App\Models\Facultad;
@@ -13,7 +18,11 @@ use App\Models\Usuario;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
-Route::middleware(DevRoleAuthMiddleware::class)->group(function () {
+Route::post('/solicitudes-acceso', [\App\Http\Controllers\SolicitudAccesoController::class, 'store']);
+
+Route::middleware('auth:sanctum')->group(function () {
+
+    Route::apiResource('usuarios', \App\Http\Controllers\UsuarioController::class)->only(['index', 'store', 'update']);
 
     // Fase 1: catálogos en cascada (facultades con escuelas activas).
     Route::get('/facultades', [FacultadController::class, 'index']);
@@ -26,24 +35,46 @@ Route::middleware(DevRoleAuthMiddleware::class)->group(function () {
     // Fase 2 — Etapa 1: registro de expediente (sin OCR) y carta del docente.
     Route::post('/expedientes', [ExpedienteController::class, 'store']);
     Route::post('/expedientes/{expediente}/archivos', [ExpedienteController::class, 'subirArchivo']);
+    
+    // Fase 9 — OCR
+    Route::post('/articulos/ocr', [\App\Http\Controllers\OcrController::class, 'upload']);
+    Route::get('/articulos/ocr/{archivo}', [\App\Http\Controllers\OcrController::class, 'status']);
 
     // Fase 3 — Bandeja de expedientes y vista detalle.
     Route::get('/expedientes', [ExpedienteController::class, 'index']);
     Route::get('/expedientes/{expediente}', [ExpedienteController::class, 'show']);
+    Route::put('/expedientes/{expediente}', [ExpedienteController::class, 'update']);
+    Route::delete('/expedientes/{expediente}', [ExpedienteController::class, 'destroy']);
     Route::get('/expedientes/{expediente}/archivos/{archivo}', [ExpedienteController::class, 'archivo']);
 
     // Fase 4 — Validación de Calidad (RN-01/RN-02) y subsanación (RN-12).
     Route::post('/expedientes/{expediente}/validacion', [ValidacionController::class, 'store']);
     Route::patch('/expedientes/{expediente}/documentos-completos', [ExpedienteController::class, 'marcarDocumentosCompletos']);
 
-    // Fase 5 — Gestor de plantillas (HU-39/40) y selección vigente (HU-41, RN-13).
-    Route::get('/tipos-documento-plantilla', [PlantillaController::class, 'tipos']);
+    // Fase 5 — Gestor de plantillas, selección vigente (RN-13) y generación documental.
     Route::get('/plantillas', [PlantillaController::class, 'index']);
     Route::post('/plantillas', [PlantillaController::class, 'store']);
     Route::patch('/plantillas/{plantilla}', [PlantillaController::class, 'update']);
     Route::delete('/plantillas/{plantilla}', [PlantillaController::class, 'destroy']);
     Route::get('/plantilla-seleccion', [PlantillaSeleccionController::class, 'index']);
     Route::post('/plantilla-seleccion', [PlantillaSeleccionController::class, 'store']);
+
+    // Fase 6 — Etapa 2: Carta VRIN→OPP (RN-09/RN-10/RN-13) y respuesta OPP (RN-06).
+    Route::get('/cartas-vrin/sugerencia', [CartaVrinController::class, 'sugerencia']);
+    Route::post('/expedientes/{expediente}/carta-vrin', [CartaVrinController::class, 'store']);
+    Route::post('/expedientes/{expediente}/respuesta-opp', [RespuestaOppController::class, 'store']);
+    Route::get('/expedientes/{expediente}/documentos/{documentoGenerado}', [ExpedienteController::class, 'documento']);
+
+    // Fase 7 — Etapa 3: Resolución (RN-08, RN-10, RN-13) y anulación.
+    Route::get('/resoluciones/sugerencia', [ResolucionController::class, 'sugerencia']);
+    Route::post('/expedientes/{expediente}/resolucion/generar', [ResolucionController::class, 'generar']);
+    Route::post('/expedientes/{expediente}/documentos/{documentoGenerado}/anular', [DocumentoGeneradoController::class, 'anular']);
+
+    // Fase 8 — Etapa 4: Rendición.
+    Route::post('/expedientes/{expediente}/rendicion/desembolso', [RendicionController::class, 'registrarDesembolso']);
+    Route::patch('/expedientes/{expediente}/rendicion/fecha-limite', [RendicionController::class, 'actualizarFechaLimite']);
+    Route::post('/expedientes/{expediente}/rendicion/doi', [RendicionController::class, 'actualizarDoi']);
+    Route::post('/expedientes/{expediente}/rendicion/cerrar', [RendicionController::class, 'cerrarRendicion']);
 
     // Endpoint de humo (Fase 0): confirma API + BD importada.
     Route::get('/ping', function () {

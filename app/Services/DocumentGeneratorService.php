@@ -2,189 +2,221 @@
 
 namespace App\Services;
 
-use App\Events\DocumentoGenerado as DocumentoGeneradoEvento;
+use App\Events\DocumentoGeneradoCreado;
 use App\Exceptions\DomainException;
 use App\Jobs\ConvertDocxToPdfJob;
 use App\Models\DocumentoGenerado;
 use App\Models\Expediente;
-use App\Models\Plantilla;
 use App\Models\PlantillaSeleccionada;
 use App\Models\TipoDocumentoPlantilla;
 use App\Models\Usuario;
-use Illuminate\Support\Facades\Storage;
-use PhpOffice\PhpWord\TemplateProcessor;
+use Illuminate\Support\Str;
 
 /**
- * Motor de generación documental (Fase 5, D-15, RN-09, RN-13).
+ * Motor de generación documental (núcleo reutilizable de las Fases 6-7).
  *
- * El mapa token→valor se arma con (a) un resolvedor por tipo de documento —
- * punto de extensión que las Fases 6 (CARTA) y 7 (RESOLUCION) completarán con
- * los valores reales del expediente vía `registrarResolvedor()` — y (b) los
- * `datosExtra` del llamador, que prevalecen sobre el resolvedor.
- *
- * La transición de estado del expediente NO vive aquí: la hace el workflow
- * que invoca este servicio, dentro de su propia transacción.
+ * Lee la plantilla vigente seleccionada (RN-13), arma el mapa token→valor
+ * (defaults del expediente + datosExtra del ejecutor), verifica contra los
+ * tokens indexados de la plantilla que nada quede sin dato (RN-09), produce
+ * el DOCX con PhpWord (dos pasadas de delimitadores) y encola la conversión
+ * a PDF. NO cambia el estado del expediente: eso lo hace el workflow.
  */
 class DocumentGeneratorService
 {
-    /**
-     * Resolvedores por tipo de documento: callable(Expediente, array<string, string>): array<string, string>.
-     *
-     * @var array<string, callable(Expediente, array<string, string>): array<string, string>>
-     */
-    private array $resolvedores = [];
+    /** Mapeo codigo tipo_documento => valor del ENUM documentos_generados.tipo. */
+    private const TIPO_GENERADO = [
+        'CARTA' => 'CARTA_VRIN',
+        'RESOLUCION' => 'RESOLUCION',
+    ];
 
-    public function __construct(private TokenParserService $tokens) {}
+    public function __construct(private readonly TokenParserService $parser) {}
 
     /**
-     * Registra el resolvedor de tokens de un tipo de documento (Fases 6/7).
-     *
-     * @param  callable(Expediente, array<string, string>): array<string, string>  $resolvedor
+     * @param  array<string, mixed>  $datosExtra
      */
-    public function registrarResolvedor(string $tipoDocumento, callable $resolvedor): void
+    public function generar(Expediente $expediente, string $tipo, array $datosExtra, Usuario $actor): DocumentoGenerado
     {
-        $this->resolvedores[$tipoDocumento] = $resolvedor;
-    }
+        $tipoDocumento = TipoDocumentoPlantilla::where('codigo', $tipo)->first();
 
-    /**
-     * Genera una nueva versión del documento del expediente desde la plantilla
-     * vigente. Jamás sobreescribe versiones anteriores (RN-02/RNF-06).
-     *
-     * @param  string  $tipoDocumento  CARTA|RESOLUCION (código de tipos_documento_plantilla)
-     * @param  array<string, string>  $datosExtra
-     *
-     * @throws DomainException si no hay plantilla vigente o falta el valor de un token
-     */
-    public function generar(Expediente $expediente, string $tipoDocumento, array $datosExtra, Usuario $actor): DocumentoGenerado
-    {
-        $plantilla = $this->plantillaVigente($expediente, $tipoDocumento);
-
-        $mapa = $this->armarMapa($expediente, $tipoDocumento, $datosExtra);
-
-        $rutaTemporal = tempnam(sys_get_temp_dir(), 'sgr_tpl_');
-
-        try {
-            // Copia normalizada: <<TOKEN>>, << TOKEN>> y {{ token }} → ${TOKEN}
-            // (la plantilla almacenada es inmutable).
-            $this->tokens->normalizarCopia(
-                Storage::disk('local')->path($plantilla->archivo_path),
-                $rutaTemporal
-            );
-
-            $procesador = new TemplateProcessor($rutaTemporal);
-            $variables = $procesador->getVariables();
-
-            // RN-09: bloquear la emisión si algún token queda sin valor.
-            $faltantes = array_values(array_filter(
-                $variables,
-                fn (string $variable) => ! array_key_exists($variable, $mapa)
-                    || $mapa[$variable] === null
-                    || $mapa[$variable] === ''
-            ));
-
-            if ($faltantes !== []) {
-                throw new DomainException(
-                    'No se puede generar el documento: falta valor para el token «'
-                    .implode('», «', $faltantes).'».'
-                );
-            }
-
-            foreach ($variables as $variable) {
-                $procesador->setValue($variable, (string) $mapa[$variable]);
-            }
-
-            $tipoColumna = $tipoDocumento === 'CARTA' ? 'CARTA_VRIN' : 'RESOLUCION';
-            $version = (int) DocumentoGenerado::where('expediente_id', $expediente->id)
-                ->where('tipo', $tipoColumna)
-                ->lockForUpdate()
-                ->max('version') + 1;
-
-            $rutaRelativa = "documentos/{$expediente->id}/{$tipoColumna}_v{$version}.docx";
-            $rutaFinal = Storage::disk('local')->path($rutaRelativa);
-            Storage::disk('local')->makeDirectory("documentos/{$expediente->id}");
-
-            $procesador->saveAs($rutaFinal);
-
-            // Red de seguridad: el DOCX emitido no puede conservar tokens.
-            $residuales = $this->tokens->extraerTokens($rutaFinal);
-
-            if ($residuales !== []) {
-                Storage::disk('local')->delete($rutaRelativa);
-
-                throw new DomainException(
-                    'El documento generado conserva tokens sin reemplazar: «'
-                    .implode('», «', $residuales).'».'
-                );
-            }
-
-            $documento = DocumentoGenerado::create([
-                'expediente_id' => $expediente->id,
-                'tipo' => $tipoColumna,
-                'version' => $version,
-                'plantilla_id' => $plantilla->id,
-                'datos' => array_intersect_key($mapa, array_flip($variables)),
-                'docx_path' => $rutaRelativa,
-                'pdf_path' => null,
-                'sha256' => hash_file('sha256', $rutaFinal),
-                'es_vigente' => true,
-                'generado_por' => $actor->id,
-                'generado_at' => now(),
-            ]);
-        } finally {
-            @unlink($rutaTemporal);
+        if ($tipoDocumento === null) {
+            throw new DomainException("Tipo de documento desconocido: {$tipo}.");
         }
 
-        DocumentoGeneradoEvento::dispatch($documento, $expediente, $actor);
+        $seleccion = PlantillaSeleccionada::where('modulo', 'ARTICULOS')
+            ->where('tipo_documento_id', $tipoDocumento->id)
+            ->with('plantilla')
+            ->first();
+
+        $plantilla = $seleccion?->plantilla;
+
+        if ($plantilla === null || $plantilla->estado !== 'ACTIVO') {
+            throw new DomainException("No hay plantilla seleccionada para {$tipo} (RN-13).");
+        }
+
+        $mapa = $this->construirMapa($expediente, $tipo, $datosExtra);
+        $tokens = $plantilla->tokens ?? [];
+
+        foreach ($tokens as $token) {
+            if (! array_key_exists($token, $mapa) || $mapa[$token] === null) {
+                throw new DomainException("Token sin dato: {$token} (RN-09).");
+            }
+        }
+
+        $tipoGenerado = self::TIPO_GENERADO[$tipo];
+        $version = (int) DocumentoGenerado::where('expediente_id', $expediente->id)
+            ->where('tipo', $tipoGenerado)
+            ->max('version') + 1;
+
+        $nombreBase = sprintf('%s_%d_%s', $tipoGenerado, $version, Str::lower(Str::random(8)));
+        $directorio = "documentos/{$expediente->id}";
+        if (! is_dir(storage_path("app/{$directorio}"))) {
+            mkdir(storage_path("app/{$directorio}"), 0755, true);
+        }
+        $rutaTemporal = $this->rutaAbsoluta("{$directorio}/{$nombreBase}.tmp.docx");
+        $rutaFinal = "{$directorio}/{$nombreBase}.docx";
+
+        // Pasada 1: delimitadores << >> (cuerpo).
+        PlantillaProcessor::fijarDelimitadores('<<', '>>');
+        $procesador = new PlantillaProcessor($this->rutaAbsoluta($plantilla->archivo_path));
+        $procesador->normalizarDelimitadores();
+
+        foreach ($mapa as $clave => $valor) {
+            $procesador->setValue($clave, $this->escapar($valor));
+        }
+
+        $procesador->saveAs($rutaTemporal);
+
+        // Pasada 2: delimitadores {{ }} (membrete de la resolución).
+        PlantillaProcessor::fijarDelimitadores('{{', '}}');
+        $procesador2 = new PlantillaProcessor($rutaTemporal);
+        $procesador2->normalizarDelimitadores();
+
+        foreach ($mapa as $clave => $valor) {
+            $procesador2->setValue($clave, $this->escapar($valor));
+        }
+
+        $procesador2->saveAs($this->rutaAbsoluta($rutaFinal));
+        unlink($rutaTemporal);
+
+        $this->validarDocx($this->rutaAbsoluta($rutaFinal));
+
+        $documento = DocumentoGenerado::create([
+            'expediente_id' => $expediente->id,
+            'tipo' => $tipoGenerado,
+            'version' => $version,
+            'plantilla_id' => $plantilla->id,
+            'datos' => $mapa,
+            'docx_path' => $rutaFinal,
+            'pdf_path' => null,
+            'sha256' => hash_file('sha256', $this->rutaAbsoluta($rutaFinal)),
+            'es_vigente' => true,
+            'generado_por' => $actor->id,
+            'generado_at' => now(),
+        ]);
+
         ConvertDocxToPdfJob::dispatch($documento->id);
+
+        event(new DocumentoGeneradoCreado($documento, $actor));
 
         return $documento;
     }
 
     /**
-     * Plantilla vigente para el módulo del expediente y el tipo de documento
-     * (RN-13: sin selección, la generación queda bloqueada).
+     * Defaults desde el expediente (snapshot + relaciones) fusionados con los
+     * datosExtra del ejecutor (estos ganan). Los tokens de etapas futuras
+     * (FECHA_CARTA_VRIN, META, …) NO se inventan: deben venir en datosExtra.
+     *
+     * @param  array<string, mixed>  $datosExtra
+     * @return array<string, mixed>
      */
-    private function plantillaVigente(Expediente $expediente, string $tipoDocumento): Plantilla
+    public function construirMapa(Expediente $expediente, string $tipo, array $datosExtra): array
     {
-        $tipo = TipoDocumentoPlantilla::where('codigo', $tipoDocumento)->first();
+        $expediente->loadMissing(['docente', 'articulo', 'escuela']);
 
-        if (! $tipo) {
-            throw new DomainException("Tipo de documento desconocido: {$tipoDocumento}.");
-        }
+        $articulo = $expediente->articulo;
 
-        $seleccion = PlantillaSeleccionada::with('plantilla')
-            ->where('modulo', $expediente->modulo)
-            ->where('tipo_documento_id', $tipo->id)
-            ->first();
+        $mapa = [
+            'CIUDAD' => config('vrin.ciudad'),
+            'GRADO' => $expediente->grado,
+            'NOMBRES' => $expediente->docente?->nombres,
+            'APELLIDO_PATERNO' => $expediente->docente?->apellido_paterno,
+            'APELLIDO_MATERNO' => $expediente->docente?->apellido_materno ?? '',
+            'CARTA_DOCENTE' => 'CARTA N° '.$expediente->carta_docente_numero,
+            'FECHA_CARTA_DOCENTE' => $expediente->carta_docente_fecha?->format('d/m/Y'),
+            'TITULO_ARTICULO' => $articulo?->titulo,
+            'REVISTA' => $articulo?->revista,
+            'BASE_DATOS' => $articulo?->base_indexadora,
+            'CUARTIL' => $articulo?->cuartil,
+            'MONTO_TOTAL_SOLICITADO' => $articulo !== null
+                ? number_format((float) $articulo->monto_solicitado, 2, '.', ',')
+                : null,
+            'ESCUELA' => $expediente->escuela?->nombre,
+            'REGLAMENTO_BASE' => config('vrin.reglamento_base'),
+        ];
 
-        if (! $seleccion?->plantilla) {
-            throw new DomainException(
-                "No hay plantilla seleccionada para {$tipoDocumento} en el módulo {$expediente->modulo}."
-            );
-        }
+        return array_merge($mapa, $datosExtra);
+    }
 
-        if ($seleccion->plantilla->estado !== 'ACTIVO') {
-            throw new DomainException(
-                "La plantilla seleccionada para {$tipoDocumento} ({$seleccion->plantilla->codigo}) está INACTIVA."
-            );
-        }
-
-        return $seleccion->plantilla;
+    private function escapar(mixed $valor): string
+    {
+        return htmlspecialchars((string) $valor, ENT_QUOTES | ENT_XML1, 'UTF-8');
     }
 
     /**
-     * Mapa token→valor: resolvedor del tipo (Fases 6/7) + datosExtra del
-     * llamador, que prevalecen.
-     *
-     * @param  array<string, string>  $datosExtra
-     * @return array<string, string>
+     * Defensa de calidad (RN-09): verifica que TODAS las partes XML del DOCX
+     * resultante (cuerpo, encabezados y pies) estén bien formadas antes de
+     * persistir la fila; si alguna parte quedó corrupta, aborta con un
+     * mensaje claro en vez de dejar un documento que LibreOffice no cargue.
      */
-    private function armarMapa(Expediente $expediente, string $tipoDocumento, array $datosExtra): array
+    private function validarDocx(string $rutaAbsoluta): void
     {
-        $resolvedor = $this->resolvedores[$tipoDocumento] ?? null;
+        $zip = new \ZipArchive;
 
-        $delResolvedor = $resolvedor ? $resolvedor($expediente, $datosExtra) : [];
+        if ($zip->open($rutaAbsoluta) !== true) {
+            throw new \RuntimeException("No se pudo abrir el DOCX generado para validarlo: {$rutaAbsoluta}");
+        }
 
-        return array_merge($delResolvedor, $datosExtra);
+        $errores = [];
+
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $parte = $zip->getNameIndex($i);
+
+            if (! is_string($parte) || ! preg_match('/^word\/(document|header|footer)\d*\.xml$/', $parte)) {
+                continue;
+            }
+
+            $xml = $zip->getFromName($parte);
+
+            if ($xml === false) {
+                continue;
+            }
+
+            $documento = new \DOMDocument;
+            $anterior = libxml_use_internal_errors(true);
+
+            if (! $documento->loadXML($xml, LIBXML_NONET)) {
+                $mensajes = array_map(
+                    fn (\LibXMLError $e): string => trim($e->message),
+                    libxml_get_errors()
+                );
+                $errores[] = "{$parte}: ".implode(' | ', array_slice($mensajes, 0, 2));
+            }
+
+            libxml_clear_errors();
+            libxml_use_internal_errors($anterior);
+        }
+
+        $zip->close();
+
+        if ($errores !== []) {
+            throw new \RuntimeException(
+                'El DOCX generado tiene XML mal formado ('.implode('; ', $errores).').'
+            );
+        }
+    }
+
+    private function rutaAbsoluta(string $relativa): string
+    {
+        return storage_path('app/'.$relativa);
     }
 }

@@ -8,10 +8,11 @@ class Auditoria extends Model
 {
     protected $table = 'auditoria';
 
-    // Append-only (D-20): solo created_at, nunca se actualiza.
-    const UPDATED_AT = null;
+    // Append-only (D-20): solo created_at, nunca se actualiza; y el sello lo
+    // fija AuditoriaService con milisegundos, no los timestamps de Eloquent.
+    public $timestamps = false;
 
-    // La columna es DATETIME(3): sello de servidor con milisegundos (RF-46).
+    // Los casts `datetime` serializan con esta precisión (DATETIME(3) en BD).
     protected $dateFormat = 'Y-m-d H:i:s.v';
 
     protected $fillable = [
@@ -23,6 +24,7 @@ class Auditoria extends Model
         'antes',
         'despues',
         'ip',
+        'created_at',
     ];
 
     protected function casts(): array

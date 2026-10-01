@@ -49,20 +49,20 @@ class ExpedienteResource extends JsonResource
     }
 
     /**
-     * La acción principal la decide el workflow: primera transición disponible
-     * (rol + precondición) con acción de UI asociada; si no hay, «Ver Expediente».
+     * Primera transición disponible con acción específica (mapa del
+     * workflow); si no hay, la acción neutra «Ver Expediente».
      *
      * @return array{clave: string, etiqueta: string}
      */
     private function accionPrincipal(?Usuario $usuario, Expediente $expediente): array
     {
-        $workflow = app(ExpedienteWorkflow::class);
+        if ($usuario !== null) {
+            $transiciones = app(ExpedienteWorkflow::class)->transicionesDisponibles($expediente, $usuario);
 
-        foreach ($workflow->transicionesDisponibles($expediente, $usuario) as $destino) {
-            $accion = $workflow->accionDeDestino($expediente->estado, $destino);
-
-            if ($accion !== null) {
-                return $accion;
+            foreach ($transiciones as $transicion) {
+                if ($transicion['accion'] !== null) {
+                    return $transicion['accion'];
+                }
             }
         }
 

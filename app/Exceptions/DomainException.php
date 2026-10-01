@@ -2,10 +2,10 @@
 
 namespace App\Exceptions;
 
-use RuntimeException;
+use Exception;
 
 /**
- * Violación de una regla del dominio (p. ej. transición de estado inválida).
- * Se mapea a HTTP 409 en bootstrap/app.php.
+ * Regla de negocio violada (transición de estado inválida, precondición
+ * incumplida, fase no habilitada). Se renderiza como HTTP 409 JSON.
  */
-class DomainException extends RuntimeException {}
+class DomainException extends Exception {}

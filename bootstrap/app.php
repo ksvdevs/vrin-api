@@ -16,13 +16,17 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         //
     })
+    ->withEvents(discover: [
+        app_path('Listeners'),
+    ])
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
 
-        // Violaciones de dominio (p. ej. transición de estado inválida) → 409 controlado.
-        $exceptions->render(function (DomainException $e) {
-            return response()->json(['message' => $e->getMessage()], 409);
-        });
+        $exceptions->render(
+            fn (DomainException $exception, Request $request) => $request->is('api/*') || $request->expectsJson()
+                ? response()->json(['message' => $exception->getMessage()], 409)
+                : null
+        );
     })->create();

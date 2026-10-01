@@ -2,102 +2,113 @@
 
 namespace App\Http\Controllers;
 
-use App\Events\PlantillaSeleccionada as PlantillaSeleccionadaEvento;
-use App\Http\Requests\SeleccionarPlantillaRequest;
+use App\Events\PlantillaSeleccionada as EventoPlantillaSeleccionada;
 use App\Models\Plantilla;
 use App\Models\PlantillaSeleccionada;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class PlantillaSeleccionController extends Controller
 {
     use AuthorizesRequests;
 
+    // GET /plantilla-seleccion?modulo=ARTICULOS — selección vigente por tipo.
     public function index(Request $request)
-    {
-        $this->authorize('viewAny', Plantilla::class);
-
-        $vigentes = PlantillaSeleccionada::query()
-            ->with(['plantilla.tipoDocumento', 'tipoDocumento'])
-            ->when($request->query('modulo'), function ($query, $modulo) {
-                $query->where('modulo', $modulo);
-            })
-            ->get();
-
-        return response()->json($vigentes);
-    }
-
-    public function store(SeleccionarPlantillaRequest $request)
     {
         $this->authorize('seleccionar', Plantilla::class);
 
-        $datos = $request->validated();
+        $filtros = $request->validate([
+            'modulo' => ['nullable', 'string', 'max:20'],
+        ]);
+
+        $modulo = $filtros['modulo'] ?? 'ARTICULOS';
+
+        $selecciones = PlantillaSeleccionada::where('modulo', $modulo)
+            ->with(['plantilla', 'tipoDocumento'])
+            ->get()
+            ->keyBy('tipo_documento_id');
+
+        return response()->json(
+            $selecciones->map(fn (PlantillaSeleccionada $s) => [
+                'modulo' => $s->modulo,
+                'tipo_documento' => $s->tipoDocumento ? [
+                    'id' => $s->tipoDocumento->id,
+                    'codigo' => $s->tipoDocumento->codigo,
+                    'nombre' => $s->tipoDocumento->nombre,
+                ] : null,
+                'plantilla' => $s->plantilla ? [
+                    'id' => $s->plantilla->id,
+                    'codigo' => $s->plantilla->codigo,
+                    'nombre' => $s->plantilla->nombre,
+                    'version' => $s->plantilla->version,
+                ] : null,
+                'seleccionado_at' => $s->seleccionado_at?->format('Y-m-d H:i:s'),
+            ])->values()
+        );
+    }
+
+    // POST /plantilla-seleccion — upsert por (modulo, tipo_documento_id); RN-13.
+    public function store(Request $request)
+    {
+        $this->authorize('seleccionar', Plantilla::class);
+
+        $datos = $request->validate([
+            'modulo' => ['nullable', 'string', 'max:20'],
+            'tipo_documento_id' => ['required', 'integer', Rule::exists('tipos_documento_plantilla', 'id')],
+            'plantilla_id' => ['required', 'integer', Rule::exists('plantillas', 'id')],
+        ]);
 
         $plantilla = Plantilla::findOrFail($datos['plantilla_id']);
 
-        if ($plantilla->tipo_documento_id !== (int) $datos['tipo_documento_id']
-            || $plantilla->modulo !== $datos['modulo']) {
+        if ($plantilla->tipo_documento_id !== (int) $datos['tipo_documento_id']) {
             throw ValidationException::withMessages([
-                'plantilla_id' => ['La plantilla no corresponde al módulo y tipo de documento indicados.'],
+                'plantilla_id' => 'La plantilla no pertenece al tipo de documento indicado.',
             ]);
         }
 
-        if ($plantilla->estado !== 'ACTIVO') {
-            throw ValidationException::withMessages([
-                'plantilla_id' => ['Solo se puede seleccionar una plantilla en estado ACTIVO.'],
+        $modulo = $datos['modulo'] ?? 'ARTICULOS';
+        $tipoDocumentoId = (int) $datos['tipo_documento_id'];
+
+        // OJO: la PK es compuesta y el modelo tiene $primaryKey = null, así que
+        // save()/update() sobre una instancia generan un UPDATE sin WHERE (bug
+        // Laravel+Eloquent). Se opera siempre por where() explícito: update()
+        // del Builder es SQL directo; el insert va por create() (performInsert,
+        // que no toca la PK). Nunca updateOrCreate() aquí.
+        $valores = [
+            'plantilla_id' => $plantilla->id,
+            'seleccionado_por' => $request->user()->id,
+            'seleccionado_at' => now(),
+        ];
+
+        $afectadas = PlantillaSeleccionada::where('modulo', $modulo)
+            ->where('tipo_documento_id', $tipoDocumentoId)
+            ->update($valores);
+
+        if ($afectadas === 0) {
+            PlantillaSeleccionada::create($valores + [
+                'modulo' => $modulo,
+                'tipo_documento_id' => $tipoDocumentoId,
             ]);
         }
 
-        $seleccion = DB::transaction(function () use ($datos, $request) {
-            // PK compuesta (modulo, tipo_documento_id): exactamente una
-            // plantilla vigente por combinación (RN-13).
-            $anterior = PlantillaSeleccionada::where('modulo', $datos['modulo'])
-                ->where('tipo_documento_id', $datos['tipo_documento_id'])
-                ->lockForUpdate()
-                ->first();
+        event(new EventoPlantillaSeleccionada(
+            $modulo,
+            $tipoDocumentoId,
+            $plantilla->id,
+            $request->user(),
+        ));
 
-            // El modelo no tiene PK simple: upsert manual por la PK compuesta.
-            if ($anterior) {
-                PlantillaSeleccionada::where('modulo', $datos['modulo'])
-                    ->where('tipo_documento_id', $datos['tipo_documento_id'])
-                    ->update([
-                        'plantilla_id' => $datos['plantilla_id'],
-                        'seleccionado_por' => $request->user()->id,
-                        'seleccionado_at' => now(),
-                    ]);
+        $seleccion = PlantillaSeleccionada::where('modulo', $modulo)
+            ->where('tipo_documento_id', $tipoDocumentoId)
+            ->firstOrFail();
 
-                // El modelo no tiene PK simple: refresh() no aplica; se relee por la PK compuesta.
-                $seleccion = PlantillaSeleccionada::where('modulo', $datos['modulo'])
-                    ->where('tipo_documento_id', $datos['tipo_documento_id'])
-                    ->first();
-            } else {
-                $seleccion = PlantillaSeleccionada::create([
-                    'modulo' => $datos['modulo'],
-                    'tipo_documento_id' => $datos['tipo_documento_id'],
-                    'plantilla_id' => $datos['plantilla_id'],
-                    'seleccionado_por' => $request->user()->id,
-                    'seleccionado_at' => now(),
-                ]);
-            }
-
-            PlantillaSeleccionadaEvento::dispatch(
-                modulo: $datos['modulo'],
-                tipoDocumentoId: (int) $datos['tipo_documento_id'],
-                plantillaId: (int) $datos['plantilla_id'],
-                actor: $request->user(),
-                antes: ['plantilla_id' => $anterior?->plantilla_id],
-                despues: [
-                    'plantilla_id' => (int) $datos['plantilla_id'],
-                    'modulo' => $datos['modulo'],
-                    'tipo_documento_id' => (int) $datos['tipo_documento_id'],
-                ],
-            );
-
-            return $seleccion;
-        });
-
-        return response()->json($seleccion->load(['plantilla.tipoDocumento', 'tipoDocumento']));
+        return response()->json([
+            'modulo' => $seleccion->modulo,
+            'tipo_documento_id' => $seleccion->tipo_documento_id,
+            'plantilla_id' => $seleccion->plantilla_id,
+            'seleccionado_at' => $seleccion->seleccionado_at?->format('Y-m-d H:i:s'),
+        ]);
     }
 }

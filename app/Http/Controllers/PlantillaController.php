@@ -2,126 +2,141 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Requests\SubirPlantillaRequest;
 use App\Models\Plantilla;
 use App\Models\TipoDocumentoPlantilla;
 use App\Services\TokenParserService;
+use App\Support\TokensConocidos;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class PlantillaController extends Controller
 {
     use AuthorizesRequests;
 
-    public function __construct(private TokenParserService $tokens) {}
+    public function __construct(private readonly TokenParserService $parser) {}
 
+    // GET /plantillas?tipo_documento_id= — gestor de plantillas (solo admin).
     public function index(Request $request)
     {
         $this->authorize('viewAny', Plantilla::class);
 
+        $filtros = $request->validate([
+            'tipo_documento_id' => ['nullable', 'integer', Rule::exists('tipos_documento_plantilla', 'id')],
+        ]);
+
         $plantillas = Plantilla::query()
             ->with('tipoDocumento')
-            ->when($request->query('tipo_documento_id'), function ($query, $tipoId) {
-                $query->where('tipo_documento_id', $tipoId);
-            })
-            ->when($request->query('estado'), function ($query, $estado) {
-                $query->where('estado', $estado);
-            })
-            ->orderBy('tipo_documento_id')
-            ->orderByDesc('version')
+            ->when($filtros['tipo_documento_id'] ?? null, fn ($q, $tipo) => $q->where('tipo_documento_id', $tipo))
+            ->orderByDesc('created_at')
             ->get();
 
-        return response()->json($plantillas);
+        return response()->json($plantillas->map(fn (Plantilla $p) => [
+            'id' => $p->id,
+            'codigo' => $p->codigo,
+            'nombre' => $p->nombre,
+            'modulo' => $p->modulo,
+            'tipo_documento' => $p->tipoDocumento ? [
+                'id' => $p->tipoDocumento->id,
+                'codigo' => $p->tipoDocumento->codigo,
+                'nombre' => $p->tipoDocumento->nombre,
+            ] : null,
+            'version' => $p->version,
+            'estado' => $p->estado,
+            'tokens_count' => count($p->tokens ?? []),
+            'sin_mapeo' => TokensConocidos::sinMapeo($p->tokens ?? [], $p->tipoDocumento?->codigo ?? ''),
+            'sha256' => $p->sha256,
+            'created_at' => $p->created_at?->format('Y-m-d H:i:s'),
+        ]));
     }
 
-    /**
-     * Catálogo de tipos de documento gestionables (alimenta los selects de
-     * subida y de selección vigente).
-     */
-    public function tipos()
-    {
-        $this->authorize('viewAny', Plantilla::class);
-
-        return response()->json(
-            TipoDocumentoPlantilla::where('activo', true)->orderBy('id')->get()
-        );
-    }
-
-    public function store(SubirPlantillaRequest $request)
+    // POST /plantillas — subida de una nueva versión de DOCX (inmutable).
+    public function store(Request $request)
     {
         $this->authorize('create', Plantilla::class);
 
-        $datos = $request->validated();
+        $datos = $request->validate([
+            'nombre' => ['required', 'string', 'max:150'],
+            'tipo_documento_id' => ['required', 'integer', Rule::exists('tipos_documento_plantilla', 'id')],
+            'archivo' => [
+                'required',
+                'file',
+                'mimetypes:application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'max:25600',
+            ],
+        ], [
+            'archivo.mimetypes' => 'El archivo debe ser un DOCX válido.',
+            'archivo.max' => 'El archivo no puede superar los 25 MB.',
+        ]);
+
         $archivo = $request->file('archivo');
+        $nombreUnico = Str::lower(Str::random(40)).'.docx';
+        // Convención del sistema (igual que expedientes): storage/app directo.
+        $archivo->move(storage_path('app/plantillas'), $nombreUnico);
+        $ruta = 'plantillas/'.$nombreUnico;
+        $tokens = $this->parser->extraer(storage_path('app/'.$ruta));
+        $tipo = TipoDocumentoPlantilla::findOrFail($datos['tipo_documento_id']);
 
-        return DB::transaction(function () use ($datos, $archivo, $request) {
-            // Nueva subida = nueva fila: el DOCX es inmutable y la versión
-            // crece por (modulo, tipo_documento_id) (Fase 5, tarea 2).
-            $version = (int) Plantilla::where('modulo', $datos['modulo'] ?? 'ARTICULOS')
-                ->where('tipo_documento_id', $datos['tipo_documento_id'])
-                ->lockForUpdate()
-                ->max('version') + 1;
+        $version = (int) Plantilla::where('nombre', $datos['nombre'])
+            ->where('tipo_documento_id', $tipo->id)
+            ->max('version') + 1;
 
-            $codigo = 'PLA-'.str_pad((string) ((int) Plantilla::lockForUpdate()->max('id') + 1), 4, '0', STR_PAD_LEFT);
+        $plantilla = Plantilla::create([
+            'codigo' => 'PLA-TMP-'.Str::lower(Str::random(8)),
+            'nombre' => $datos['nombre'],
+            'modulo' => 'ARTICULOS',
+            'tipo_documento_id' => $tipo->id,
+            'version' => $version,
+            'archivo_path' => $ruta,
+            'sha256' => hash_file('sha256', storage_path('app/'.$ruta)),
+            'tokens' => $tokens,
+            'estado' => 'ACTIVO',
+            'created_by' => $request->user()->id,
+        ]);
 
-            $path = $archivo->storeAs('plantillas', "{$codigo}_v{$version}.docx", 'local');
-            $rutaAbsoluta = Storage::disk('local')->path($path);
+        // D-22: el código definitivo usa el id asignado (PLA-0001, …).
+        $plantilla->codigo = 'PLA-'.str_pad((string) $plantilla->id, 4, '0', STR_PAD_LEFT);
+        $plantilla->save();
 
-            $tokens = $this->tokens->extraerTokens($rutaAbsoluta);
-
-            $plantilla = Plantilla::create([
-                'codigo' => $codigo,
-                'nombre' => $datos['nombre'],
-                'modulo' => $datos['modulo'] ?? 'ARTICULOS',
-                'tipo_documento_id' => $datos['tipo_documento_id'],
-                'version' => $version,
-                'archivo_path' => $path,
-                'sha256' => hash_file('sha256', $rutaAbsoluta),
-                'tokens' => $tokens,
-                'estado' => 'ACTIVO',
-                'created_by' => $request->user()->id,
-            ]);
-
-            $sinMapeo = $this->tokens->tokensSinMapeo(
-                $tokens,
-                $plantilla->tipoDocumento->codigo
-            );
-
-            return response()->json([
-                'plantilla' => $plantilla->load('tipoDocumento'),
-                'tokens' => $tokens,
-                'advertencia_tokens_sin_mapeo' => $sinMapeo,
-            ], 201);
-        });
+        return response()->json([
+            'id' => $plantilla->id,
+            'codigo' => $plantilla->codigo,
+            'nombre' => $plantilla->nombre,
+            'modulo' => $plantilla->modulo,
+            'tipo_documento' => ['id' => $tipo->id, 'codigo' => $tipo->codigo, 'nombre' => $tipo->nombre],
+            'version' => $plantilla->version,
+            'estado' => $plantilla->estado,
+            'tokens' => $tokens,
+            'sin_mapeo' => TokensConocidos::sinMapeo($tokens, $tipo->codigo),
+            'sha256' => $plantilla->sha256,
+            'created_at' => $plantilla->created_at?->format('Y-m-d H:i:s'),
+        ], 201);
     }
 
+    // PATCH /plantillas/{plantilla} — solo cambio de estado (el DOCX es inmutable).
     public function update(Request $request, Plantilla $plantilla)
     {
         $this->authorize('update', $plantilla);
 
-        // El DOCX es inmutable: solo se permite cambiar el estado.
         $datos = $request->validate([
-            'estado' => ['required', 'in:ACTIVO,INACTIVO'],
-        ], [
-            'estado.required' => 'El estado es obligatorio.',
-            'estado.in' => 'El estado debe ser ACTIVO o INACTIVO.',
+            'estado' => ['required', Rule::in(['ACTIVO', 'INACTIVO'])],
         ]);
 
-        $plantilla->update($datos);
+        $plantilla->estado = $datos['estado'];
+        $plantilla->save();
 
-        return response()->json($plantilla->refresh()->load('tipoDocumento'));
+        return response()->json(['id' => $plantilla->id, 'estado' => $plantilla->estado]);
     }
 
+    // DELETE /plantillas/{plantilla} — baja lógica (la tabla no tiene deleted_at).
     public function destroy(Plantilla $plantilla)
     {
         $this->authorize('delete', $plantilla);
 
-        // Baja lógica: la tabla no tiene deleted_at; el retiro es INACTIVO y
-        // el DOCX jamás se borra del disco (RNF-06).
-        $plantilla->update(['estado' => 'INACTIVO']);
+        $plantilla->estado = 'INACTIVO';
+        $plantilla->save();
 
-        return response()->json(null, 204);
+        return response()->json(['id' => $plantilla->id, 'estado' => $plantilla->estado]);
     }
 }

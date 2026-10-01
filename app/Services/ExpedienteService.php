@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Events\ExpedienteCreado;
+use App\Events\ExpedienteRegistrado;
 use App\Models\Docente;
 use App\Models\Expediente;
 use App\Models\Usuario;
@@ -85,8 +85,7 @@ class ExpedienteService
                 'doi' => $datos['doi'] ?? null,
             ]);
 
-            // Auditoría central (D-20): el listener EscribirAuditoria registra el evento.
-            ExpedienteCreado::dispatch($expediente, $usuario);
+            event(new ExpedienteRegistrado($expediente, $usuario));
 
             return [
                 'expediente' => $expediente->load('articulo'),
