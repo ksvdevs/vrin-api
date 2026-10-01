@@ -1,0 +1,46 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+
+class Rendicion extends Model
+{
+    protected $table = 'rendiciones';
+
+    protected $primaryKey = 'expediente_id';
+
+    public $incrementing = false;
+
+    protected $fillable = [
+        'expediente_id',
+        'fecha_desembolso',
+        'fecha_limite',
+        'fecha_informe',
+        'estado',
+        'con_retraso',
+        'cerrada_por',
+        'cerrada_at',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'fecha_desembolso' => 'date',
+            'fecha_limite' => 'date',
+            'fecha_informe' => 'date',
+            'con_retraso' => 'boolean',
+            'cerrada_at' => 'datetime',
+        ];
+    }
+
+    public function expediente()
+    {
+        return $this->belongsTo(Expediente::class, 'expediente_id');
+    }
+
+    public function cerrador()
+    {
+        return $this->belongsTo(Usuario::class, 'cerrada_por');
+    }
+}
