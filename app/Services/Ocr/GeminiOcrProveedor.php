@@ -12,14 +12,14 @@ class GeminiOcrProveedor implements ProveedorOcr
     public function extraer(string $rutaImagen): array
     {
         $apiKey = config('services.gemini.api_key');
-        if (!$apiKey) {
+        if (! $apiKey) {
             throw new RuntimeException('Falta configurar GEMINI_API_KEY');
         }
 
         $imageData = base64_encode(file_get_contents($rutaImagen));
         $mimeType = mime_content_type($rutaImagen) ?: 'image/jpeg';
 
-        $prompt = <<<EOT
+        $prompt = <<<'EOT'
 Extrae los siguientes datos de la carta adjunta y responde ÚNICAMENTE con un objeto JSON válido (sin formato markdown ni backticks).
 El JSON debe tener exactamente esta estructura y los valores deben cumplir estas reglas:
 {
@@ -30,39 +30,45 @@ El JSON debe tener exactamente esta estructura y los valores deben cumplir estas
   "base_indexadora": "Debe ser exactamente uno de: Scopus, Web of Science, SciELO, Otra",
   "cuartil": "Debe ser exactamente uno de: Q1, Q2, Q3, Q4",
   "monto_solicitado": número decimal (ej. 1500.50),
-  "docente_dni": "8 dígitos numéricos"
+  "docente_dni": "8 dígitos numéricos",
+  "docente_nombre": "Nombre completo del docente",
+  "doi": "DOI del artículo, ej. 10.1234/abcd (sin URL)"
 }
 Si algún dato no se encuentra o es ilegible, envíalo como nulo (null).
 EOT;
 
+        $modelo = config('services.gemini.model', 'gemini-3.5-flash');
+
         $response = Http::withHeaders([
             'Content-Type' => 'application/json',
-        ])->post("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={$apiKey}", [
-            'contents' => [
-                [
-                    'parts' => [
-                        ['text' => $prompt],
-                        [
-                            'inline_data' => [
-                                'mime_type' => $mimeType,
-                                'data' => $imageData
-                            ]
-                        ]
-                    ]
-                ]
-            ],
-            'generationConfig' => [
-                'response_mime_type' => 'application/json'
-            ]
-        ]);
+        ])->timeout(60)
+            ->retry(3, 3000, fn ($exception, $pendingRequest) => in_array($exception->response?->status(), [429, 503]), throw: false)
+            ->post("https://generativelanguage.googleapis.com/v1beta/models/{$modelo}:generateContent?key={$apiKey}", [
+                'contents' => [
+                    [
+                        'parts' => [
+                            ['text' => $prompt],
+                            [
+                                'inline_data' => [
+                                    'mime_type' => $mimeType,
+                                    'data' => $imageData,
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                'generationConfig' => [
+                    'response_mime_type' => 'application/json',
+                ],
+            ]);
 
-        if (!$response->successful()) {
+        if (! $response->successful()) {
             Log::error('Error de Gemini OCR', ['status' => $response->status(), 'body' => $response->body()]);
             throw new RuntimeException('Error de conexión con Gemini OCR');
         }
 
         $jsonStr = $response->json('candidates.0.content.parts.0.text');
-        if (!$jsonStr) {
+        if (! $jsonStr) {
             throw new RuntimeException('Gemini no devolvió texto');
         }
 
@@ -75,10 +81,11 @@ EOT;
             throw new RuntimeException('Respuesta OCR no es JSON válido');
         }
 
-        // Fake confidence levels as Gemini doesn't return per-field confidence natively in standard API
+        // La API estándar de Gemini no devuelve confianza por campo: se reporta
+        // alta cuando el dato se extrajo y cero cuando vino nulo.
         $confianza = [];
         foreach ($datos as $k => $v) {
-            $confianza[$k] = $v !== null ? rand(80, 99) / 100 : 0.0;
+            $confianza[$k] = $v !== null ? 0.95 : 0.0;
         }
 
         return [

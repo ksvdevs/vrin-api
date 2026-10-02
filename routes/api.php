@@ -44,9 +44,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/expedientes', [ExpedienteController::class, 'store']);
     Route::post('/expedientes/{expediente}/archivos', [ExpedienteController::class, 'subirArchivo']);
 
-    // Fase 9 — OCR
-    Route::post('/articulos/ocr', [OcrController::class, 'upload']);
-    Route::get('/articulos/ocr/{archivo}', [OcrController::class, 'status']);
+    // Fase 9 — OCR síncrono: extrae metadatos de la carta escaneada del docente.
+    Route::post('/articulos/ocr', [OcrController::class, 'extraer']);
 
     // Fase 3 — Bandeja de expedientes y vista detalle.
     Route::get('/expedientes', [ExpedienteController::class, 'index']);

@@ -28,7 +28,7 @@ class RolController extends Controller
                 fn ($query) => $query->whereLike('nombre', '%'.$request->input('nombre').'%')
             )
             ->when(
-                $request->filled('activo'),
+                $request->has('activo') && $request->input('activo') !== null,
                 fn ($query) => $query->where('activo', $request->boolean('activo'))
             )
             ->orderByDesc('created_at')

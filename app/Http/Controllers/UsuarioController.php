@@ -32,7 +32,7 @@ class UsuarioController extends Controller
                 fn ($query) => $query->whereLike('email', '%'.$request->input('email').'%')
             )
             ->when(
-                $request->filled('activo'),
+                $request->has('activo') && $request->input('activo') !== null,
                 fn ($query) => $query->where('activo', $request->boolean('activo'))
             )
             ->orderByDesc('created_at')

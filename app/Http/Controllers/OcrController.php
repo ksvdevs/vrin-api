@@ -2,50 +2,45 @@
 
 namespace App\Http\Controllers;
 
-use App\Jobs\ExtraerOcrJob;
-use App\Models\Archivo;
+use App\Services\Ocr\GeminiOcrProveedor;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Throwable;
 
 class OcrController extends Controller
 {
-    public function upload(Request $request)
+    public function extraer(Request $request, GeminiOcrProveedor $ocr)
     {
         $request->validate([
             'archivo' => 'required|file|mimes:pdf,jpg,jpeg,png|max:25600',
         ]);
 
         $file = $request->file('archivo');
-        $path = $file->storeAs('ocr_temp', Str::uuid() . '.' . $file->extension());
+        $path = $file->storeAs('ocr_temp', Str::uuid().'.'.$file->extension());
 
-        $archivo = Archivo::create([
-            'expediente_id' => null, // Not yet linked
-            'nombre_original' => $file->getClientOriginalName(),
-            'ruta' => $path,
-            'sha256' => hash_file('sha256', $file->getRealPath()),
-            'tamano_bytes' => $file->getSize(),
-            'tipo' => 'CARTA_DOCENTE',
-            'etapa' => 1,
-            'subido_por' => $request->user()->id,
-            'ocr_estado' => 'PENDIENTE'
-        ]);
+        try {
+            $resultado = $ocr->extraer(Storage::path($path));
 
-        ExtraerOcrJob::dispatch($archivo);
+            $camposExtraidos = collect($resultado['datos'])
+                ->filter(fn ($valor) => $valor !== null && $valor !== '')
+                ->count();
 
-        return response()->json(['archivo_id' => $archivo->id], 202);
-    }
+            return response()->json([
+                'datos' => $resultado['datos'],
+                'confianza' => $resultado['confianza'],
+                'campos_extraidos' => $camposExtraidos,
+                'nombre_archivo' => $file->getClientOriginalName(),
+            ]);
+        } catch (Throwable $e) {
+            Log::error('Error en OCR de carta docente', ['error' => $e->getMessage()]);
 
-    public function status($id, Request $request)
-    {
-        $archivo = Archivo::where('subido_por', $request->user()->id)
-            ->findOrFail($id);
-
-        return response()->json([
-            'id' => $archivo->id,
-            'ocr_estado' => $archivo->ocr_estado,
-            'ocr_json' => $archivo->ocr_json,
-            'ocr_confianza' => $archivo->ocr_confianza,
-        ]);
+            return response()->json([
+                'message' => 'No se pudo analizar la carta. Complete el formulario manualmente.',
+            ], 422);
+        } finally {
+            Storage::delete($path);
+        }
     }
 }
