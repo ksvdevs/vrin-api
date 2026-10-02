@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Expediente;
+use App\Models\Rol;
 use App\Models\Usuario;
 use App\Services\ExpedienteWorkflow;
 use Carbon\Carbon;
@@ -47,12 +48,10 @@ class MarcarRendicionesVencidas extends Command
             return 0;
         }
 
-        // Recuperar usuario SISTEMA o simular uno para auditoría
-        $sistema = Usuario::where('rol', 'SISTEMA')->first() ?? (new Usuario([
-            'id' => 999999, // Un ID ficticio pero válido si no hay modelo físico guardado
-            'nombres' => 'SISTEMA',
-            'rol' => 'SISTEMA',
-        ]));
+        // Actor sintético SISTEMA para la auditoría de la transición automática.
+        $sistema = new Usuario;
+        $sistema->forceFill(['id' => 999999, 'nombres' => 'SISTEMA', 'apellidos' => '']);
+        $sistema->setRelation('rolRef', new Rol(['nombre' => 'SISTEMA']));
 
         $marcados = 0;
 

@@ -1,28 +1,36 @@
 <?php
 
+use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CartaVrinController;
 use App\Http\Controllers\DocenteController;
 use App\Http\Controllers\DocumentoGeneradoController;
 use App\Http\Controllers\EscuelaController;
 use App\Http\Controllers\ExpedienteController;
 use App\Http\Controllers\FacultadController;
+use App\Http\Controllers\OcrController;
 use App\Http\Controllers\PlantillaController;
 use App\Http\Controllers\PlantillaSeleccionController;
 use App\Http\Controllers\RendicionController;
 use App\Http\Controllers\ResolucionController;
 use App\Http\Controllers\RespuestaOppController;
+use App\Http\Controllers\RolController;
+use App\Http\Controllers\UsuarioController;
 use App\Http\Controllers\ValidacionController;
-use App\Http\Middleware\DevRoleAuthMiddleware;
 use App\Models\Facultad;
-use App\Models\Usuario;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
-Route::post('/solicitudes-acceso', [\App\Http\Controllers\SolicitudAccesoController::class, 'store']);
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
 
 Route::middleware('auth:sanctum')->group(function () {
 
-    Route::apiResource('usuarios', \App\Http\Controllers\UsuarioController::class)->only(['index', 'store', 'update']);
+    Route::post('/logout', [AuthController::class, 'logout']);
+
+    Route::get('/usuarios/validar-dni', [UsuarioController::class, 'validarDni']);
+    Route::apiResource('usuarios', UsuarioController::class);
+    Route::apiResource('roles', RolController::class)
+        ->only(['index', 'store', 'update', 'destroy'])
+        ->parameters(['roles' => 'rol']);
 
     // Fase 1: catálogos en cascada (facultades con escuelas activas).
     Route::get('/facultades', [FacultadController::class, 'index']);
@@ -35,10 +43,10 @@ Route::middleware('auth:sanctum')->group(function () {
     // Fase 2 — Etapa 1: registro de expediente (sin OCR) y carta del docente.
     Route::post('/expedientes', [ExpedienteController::class, 'store']);
     Route::post('/expedientes/{expediente}/archivos', [ExpedienteController::class, 'subirArchivo']);
-    
+
     // Fase 9 — OCR
-    Route::post('/articulos/ocr', [\App\Http\Controllers\OcrController::class, 'upload']);
-    Route::get('/articulos/ocr/{archivo}', [\App\Http\Controllers\OcrController::class, 'status']);
+    Route::post('/articulos/ocr', [OcrController::class, 'upload']);
+    Route::get('/articulos/ocr/{archivo}', [OcrController::class, 'status']);
 
     // Fase 3 — Bandeja de expedientes y vista detalle.
     Route::get('/expedientes', [ExpedienteController::class, 'index']);
@@ -76,15 +84,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/expedientes/{expediente}/rendicion/doi', [RendicionController::class, 'actualizarDoi']);
     Route::post('/expedientes/{expediente}/rendicion/cerrar', [RendicionController::class, 'cerrarRendicion']);
 
-    // Endpoint de humo (Fase 0): confirma API + BD importada.
-    Route::get('/ping', function () {
-        return response()->json([
-            'ok' => true,
-            'db' => Facultad::count(),
-        ]);
-    });
-
-    // Usuario autenticado actual (con el login simulado).
+    // Usuario autenticado actual.
     Route::get('/me', function (Request $request) {
         $usuario = $request->user();
 
@@ -92,17 +92,19 @@ Route::middleware('auth:sanctum')->group(function () {
             return response()->json(['message' => 'No autenticado.'], 401);
         }
 
-        return response()->json($usuario->only('id', 'nombre', 'email', 'rol'));
-    });
+        $usuario->loadMissing('rolRef');
 
-    // Endpoints de desarrollo: solo se registran en entorno local.
-    if (app()->environment('local')) {
-        Route::get('/dev/usuarios', function () {
-            return response()->json(
-                Usuario::where('activo', true)
-                    ->orderBy('id')
-                    ->get(['id', 'nombre', 'email', 'rol'])
-            );
-        });
-    }
+        return response()->json($usuario->only(
+            'id', 'dni', 'nombres', 'apellidos', 'nombre', 'email',
+            'rol', 'rol_codigo', 'rol_id', 'activo', 'ultimo_login_at',
+        ));
+    });
+});
+
+// Endpoint de humo (Fase 0): confirma API + BD importada.
+Route::get('/ping', function () {
+    return response()->json([
+        'ok' => true,
+        'db' => Facultad::count(),
+    ]);
 });

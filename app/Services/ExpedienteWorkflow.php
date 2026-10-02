@@ -37,7 +37,7 @@ class ExpedienteWorkflow
     private const TRANSICIONES = [
         'OBSERVADO' => [
             'EN_REVISION_CALIDAD' => [
-                'roles' => ['SECRETARIA', 'ADMINISTRADOR'],
+                'roles' => ['SECRETARIA', 'ADMINISTRADOR_GENERAL'],
                 'accion' => ['subsanar', 'Completar Documentos'],
                 'ejecutor' => 'subsanacion',
                 'fase' => 4,
@@ -65,7 +65,7 @@ class ExpedienteWorkflow
         ],
         'VALIDADO_CALIDAD' => [
             'EN_ESPERA_OPP' => [
-                'roles' => ['SECRETARIA', 'ADMINISTRADOR'],
+                'roles' => ['SECRETARIA', 'ADMINISTRADOR_GENERAL'],
                 'accion' => ['generar_carta', 'Generar Carta'],
                 'ejecutor' => 'carta_vrin',
                 'fase' => 6,
@@ -75,7 +75,7 @@ class ExpedienteWorkflow
         ],
         'EN_ESPERA_OPP' => [
             'DISPONIBILIDAD_CONFIRMADA' => [
-                'roles' => ['SECRETARIA', 'ADMINISTRADOR'],
+                'roles' => ['SECRETARIA', 'ADMINISTRADOR_GENERAL'],
                 'accion' => null,
                 'ejecutor' => 'respuesta_opp',
                 'fase' => 6,
@@ -83,7 +83,7 @@ class ExpedienteWorkflow
                 'requiere_completos' => false,
             ],
             'SIN_DISPONIBILIDAD' => [
-                'roles' => ['SECRETARIA', 'ADMINISTRADOR'],
+                'roles' => ['SECRETARIA', 'ADMINISTRADOR_GENERAL'],
                 'accion' => null,
                 'ejecutor' => 'respuesta_opp',
                 'fase' => 6,
@@ -93,7 +93,7 @@ class ExpedienteWorkflow
         ],
         'DISPONIBILIDAD_CONFIRMADA' => [
             'RESOLUCION_EMITIDA' => [
-                'roles' => ['SECRETARIA', 'ADMINISTRADOR'],
+                'roles' => ['SECRETARIA', 'ADMINISTRADOR_GENERAL'],
                 'accion' => ['generar_resolucion', 'Generar Resol.'],
                 'ejecutor' => 'resolucion',
                 'fase' => 7,
@@ -103,7 +103,7 @@ class ExpedienteWorkflow
         ],
         'RESOLUCION_EMITIDA' => [
             'POR_RENDIR' => [
-                'roles' => ['SECRETARIA', 'ADMINISTRADOR'],
+                'roles' => ['SECRETARIA', 'ADMINISTRADOR_GENERAL'],
                 'accion' => null,
                 'ejecutor' => 'desembolso',
                 'fase' => 8,
@@ -121,7 +121,7 @@ class ExpedienteWorkflow
                 'requiere_completos' => false,
             ],
             'RENDIDO' => [
-                'roles' => ['SECRETARIA', 'ADMINISTRADOR'],
+                'roles' => ['SECRETARIA', 'ADMINISTRADOR_GENERAL'],
                 'accion' => ['revisar_rendicion', 'Revisar Rendición'],
                 'ejecutor' => 'cerrar_rendicion',
                 'fase' => 8,
@@ -131,7 +131,7 @@ class ExpedienteWorkflow
         ],
         'RENDICION_VENCIDA' => [
             'RENDIDO' => [
-                'roles' => ['SECRETARIA', 'ADMINISTRADOR'],
+                'roles' => ['SECRETARIA', 'ADMINISTRADOR_GENERAL'],
                 'accion' => ['revisar_rendicion', 'Revisar Rendición'],
                 'ejecutor' => 'cerrar_rendicion',
                 'fase' => 8,
@@ -155,7 +155,7 @@ class ExpedienteWorkflow
         $disponibles = [];
 
         foreach ($transiciones as $destino => $meta) {
-            if (! in_array($actor->rol, $meta['roles'], true)) {
+            if (! in_array($actor->rol_codigo, $meta['roles'], true)) {
                 continue;
             }
 
@@ -191,7 +191,7 @@ class ExpedienteWorkflow
                 throw new DomainException("No existe la transición {$origen} → {$destino}.");
             }
 
-            if (! in_array($actor->rol, $meta['roles'], true)) {
+            if (! in_array($actor->rol_codigo, $meta['roles'], true)) {
                 throw new DomainException('Tu rol no puede ejecutar esta transición.');
             }
 

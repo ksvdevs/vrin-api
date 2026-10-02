@@ -5,8 +5,11 @@ namespace Database\Seeders;
 use App\Models\Docente;
 use App\Models\Escuela;
 use App\Models\Facultad;
+use App\Models\Rol;
 use App\Models\Usuario;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 class DatosRealesSeeder extends Seeder
 {
@@ -16,15 +19,41 @@ class DatosRealesSeeder extends Seeder
      */
     public function run(): void
     {
-        // --- Usuarios por rol para el login simulado (D-06) ---
-        // El admin@unamba.edu.pe ya existe (semilla del SQL).
+        // --- Usuarios por rol ---
+        // El admin@unamba.edu.pe ya existe (semilla del SQL); aquí se asegura
+        // su clave por defecto. Claves de desarrollo, cambiarlas en producción.
+        Usuario::updateOrCreate(
+            ['email' => 'admin@unamba.edu.pe'],
+            [
+                'dni' => '00000000',
+                'nombres' => 'Administrador General',
+                'apellidos' => 'VRIN',
+                'rol_id' => 1,
+                'password_hash' => Hash::make('Admin2026!'),
+                'activo' => true,
+            ],
+        );
         Usuario::updateOrCreate(
             ['email' => 'secretaria@unamba.edu.pe'],
-            ['nombre' => 'Secretaría VRIN', 'rol' => 'SECRETARIA', 'activo' => true],
+            [
+                'dni' => '00000001',
+                'nombres' => 'Secretaría',
+                'apellidos' => 'VRIN',
+                'rol_id' => Rol::where('nombre', 'Secretaría')->value('id') ?? 2,
+                'password_hash' => Hash::make('Sgr2026!'),
+                'activo' => true,
+            ],
         );
         Usuario::updateOrCreate(
             ['email' => 'calidad@unamba.edu.pe'],
-            ['nombre' => 'Unidad de Calidad VRIN', 'rol' => 'CALIDAD', 'activo' => true],
+            [
+                'dni' => '00000002',
+                'nombres' => 'Unidad de Calidad',
+                'apellidos' => 'VRIN',
+                'rol_id' => Rol::where('nombre', 'Calidad')->value('id') ?? 3,
+                'password_hash' => Hash::make('Sgr2026!'),
+                'activo' => true,
+            ],
         );
 
         // --- Estructura académica de la UNAMBA ---
@@ -67,9 +96,16 @@ class DatosRealesSeeder extends Seeder
 
         $escuelaIds = [];
         foreach ($estructura as $nombreFacultad => $nombresEscuelas) {
+            // Acrónimo por iniciales («Facultad de Ingeniería» → «FI»):
+            // la columna facultades.acronimo es NOT NULL en el esquema SQL.
+            $acronimo = collect(explode(' ', $nombreFacultad))
+                ->reject(fn (string $palabra) => in_array(Str::lower($palabra), ['de', 'del', 'la', 'las', 'y', 'e'], true))
+                ->map(fn (string $palabra) => Str::upper(Str::substr($palabra, 0, 1)))
+                ->implode('');
+
             $facultad = Facultad::updateOrCreate(
                 ['nombre' => $nombreFacultad],
-                ['activo' => true],
+                ['acronimo' => $acronimo, 'activo' => true],
             );
             foreach ($nombresEscuelas as $nombreEscuela) {
                 $escuela = Escuela::updateOrCreate(

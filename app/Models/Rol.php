@@ -3,14 +3,15 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class Facultad extends Model
+class Rol extends Model
 {
-    protected $table = 'facultades';
+    protected $table = 'roles';
 
     protected $fillable = [
         'nombre',
-        'acronimo',
+        'descripcion',
         'activo',
     ];
 
@@ -21,8 +22,8 @@ class Facultad extends Model
         ];
     }
 
-    public function escuelas()
+    public function usuarios(): HasMany
     {
-        return $this->hasMany(Escuela::class, 'facultad_id');
+        return $this->hasMany(Usuario::class, 'rol_id');
     }
 }

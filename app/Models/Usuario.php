@@ -3,8 +3,11 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Str;
 
 class Usuario extends Authenticatable
 {
@@ -12,17 +15,26 @@ class Usuario extends Authenticatable
 
     protected $table = 'usuarios';
 
-    // La tabla no tiene password: la autenticación final es Google (Fase 11, D-06).
     protected $fillable = [
         'email',
-        'nombre',
-        'rol',
+        'dni',
+        'nombres',
+        'apellidos',
+        'rol_id',
+        'password_hash',
         'google_sub',
         'activo',
         'ultimo_login_at',
     ];
 
+    protected $appends = [
+        'nombre',
+        'rol',
+        'rol_codigo',
+    ];
+
     protected $hidden = [
+        'password_hash',
         'remember_token',
     ];
 
@@ -34,62 +46,88 @@ class Usuario extends Authenticatable
         ];
     }
 
-    public function solicitudesRevisadas()
+    public function getAuthPassword(): string
     {
-        return $this->hasMany(SolicitudAcceso::class, 'revisado_por');
+        return $this->password_hash;
     }
 
-    public function expedientesCreados()
+    public function getNombreAttribute(): string
+    {
+        return trim(($this->attributes['nombres'] ?? '').' '.($this->attributes['apellidos'] ?? ''));
+    }
+
+    public function getRolAttribute(): ?string
+    {
+        return $this->rolRef?->nombre;
+    }
+
+    public function getRolCodigoAttribute(): ?string
+    {
+        $nombre = $this->rolRef?->nombre;
+
+        if ($nombre === null) {
+            return null;
+        }
+
+        return Str::of($nombre)->slug('_')->upper()->toString();
+    }
+
+    public function rolRef(): BelongsTo
+    {
+        return $this->belongsTo(Rol::class, 'rol_id');
+    }
+
+    public function expedientesCreados(): HasMany
     {
         return $this->hasMany(Expediente::class, 'created_by');
     }
 
-    public function expedientesEditados()
+    public function expedientesEditados(): HasMany
     {
         return $this->hasMany(Expediente::class, 'updated_by');
     }
 
-    public function validacionesCalidad()
+    public function validacionesCalidad(): HasMany
     {
         return $this->hasMany(ValidacionCalidad::class, 'validado_por');
     }
 
-    public function cartasEmitidas()
+    public function cartasEmitidas(): HasMany
     {
         return $this->hasMany(CartaVrin::class, 'emitida_por');
     }
 
-    public function respuestasOppRegistradas()
+    public function respuestasOppRegistradas(): HasMany
     {
         return $this->hasMany(RespuestaOpp::class, 'registrado_por');
     }
 
-    public function resolucionesEmitidas()
+    public function resolucionesEmitidas(): HasMany
     {
         return $this->hasMany(Resolucion::class, 'emitida_por');
     }
 
-    public function rendicionesCerradas()
+    public function rendicionesCerradas(): HasMany
     {
         return $this->hasMany(Rendicion::class, 'cerrada_por');
     }
 
-    public function archivosSubidos()
+    public function archivosSubidos(): HasMany
     {
         return $this->hasMany(Archivo::class, 'subido_por');
     }
 
-    public function plantillasCreadas()
+    public function plantillasCreadas(): HasMany
     {
         return $this->hasMany(Plantilla::class, 'created_by');
     }
 
-    public function documentosGenerados()
+    public function documentosGenerados(): HasMany
     {
         return $this->hasMany(DocumentoGenerado::class, 'generado_por');
     }
 
-    public function observacionesCreadas()
+    public function observacionesCreadas(): HasMany
     {
         return $this->hasMany(Observacion::class, 'creada_por');
     }

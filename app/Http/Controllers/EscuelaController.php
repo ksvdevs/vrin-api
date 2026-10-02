@@ -11,9 +11,9 @@ class EscuelaController extends Controller
     public function store(Request $request)
     {
         abort_unless(
-            $request->user()?->rol === 'ADMINISTRADOR',
+            $request->user()?->rol_codigo === 'ADMINISTRADOR_GENERAL',
             403,
-            'Solo el rol ADMINISTRADOR puede registrar escuelas.'
+            'Solo el rol Administrador General puede registrar escuelas.'
         );
 
         $data = $request->validate([
