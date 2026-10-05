@@ -20,6 +20,8 @@ class GenerarCartaVrinRequest extends FormRequest
             'fecha' => ['required', 'date'],
             'ciudad' => ['nullable', 'string', 'max:60'],
             'registro_mp_numero' => ['nullable', 'string', 'max:30'],
+            'asunto' => ['nullable', 'string', 'max:255'],
+            'fecha_aceptacion' => ['nullable', 'date'],
         ];
     }
 

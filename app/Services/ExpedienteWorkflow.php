@@ -299,6 +299,7 @@ class ExpedienteWorkflow
             'anio' => $anio,
             'fecha' => $fecha->format('Y-m-d'),
             'ciudad' => $ciudad,
+            'asunto' => $payload['asunto'] ?? null,
             'estado' => 'EMITIDA',
             'emitida_por' => $actor->id,
         ]);
@@ -308,11 +309,19 @@ class ExpedienteWorkflow
             $expediente->registro_mp_numero = $payload['registro_mp_numero'];
         }
 
+        if (array_key_exists('fecha_aceptacion', $payload)) {
+            $expediente->articulo->update(['fecha_aceptacion' => $payload['fecha_aceptacion']]);
+        }
+
+        $fechaAceptacion = $expediente->articulo->fecha_aceptacion;
+
         $this->generator->generar($expediente, 'CARTA', [
             'CIUDAD' => $ciudad,
             'FECHA_CARTA_VRIN' => $this->fechaLarga($fecha),
             'NUMERO_CARTA_VRIN' => $numeroFormateado,
             'REGISTRO_MESA_PARTES' => $payload['registro_mp_numero'] ?? '—',
+            'ASUNTO_CARTA' => $payload['asunto'] ?? null,
+            'FECHA_ACEPTACION' => $fechaAceptacion ? $this->fechaLarga(Carbon::parse($fechaAceptacion)) : null,
         ], $actor);
 
         return [];

@@ -20,6 +20,7 @@ class DocumentoGenerado extends Model
         'docx_path',
         'pdf_path',
         'sha256',
+        'codigo_verificacion',
         'es_vigente',
         'generado_por',
         'generado_at',

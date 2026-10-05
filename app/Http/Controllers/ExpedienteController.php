@@ -6,6 +6,7 @@ use App\Http\Requests\RegistrarExpedienteRequest;
 use App\Http\Requests\SubirArchivoRequest;
 use App\Http\Resources\ExpedienteResource;
 use App\Models\Archivo;
+use App\Models\Docente;
 use App\Models\DocumentoGenerado;
 use App\Models\Expediente;
 use App\Services\ExpedienteService;
@@ -13,6 +14,7 @@ use App\Services\ExpedienteWorkflow;
 use App\Support\EstadoExpediente;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -126,6 +128,7 @@ class ExpedienteController extends Controller
                 'cuartil' => $articulo->cuartil,
                 'monto_solicitado' => (float) $articulo->monto_solicitado,
                 'doi' => $articulo->doi,
+                'fecha_aceptacion' => $articulo->fecha_aceptacion?->format('Y-m-d'),
             ] : null,
             'validacion_calidad' => $validacion ? [
                 'resultado' => $validacion->resultado,
@@ -139,6 +142,7 @@ class ExpedienteController extends Controller
                 'anio' => $cartaVrin->anio,
                 'fecha' => $cartaVrin->fecha?->format('Y-m-d'),
                 'ciudad' => $cartaVrin->ciudad,
+                'asunto' => $cartaVrin->asunto,
                 'estado' => $cartaVrin->estado,
                 'emitida_por' => $cartaVrin->emisor?->nombre,
             ] : null,
@@ -308,9 +312,9 @@ class ExpedienteController extends Controller
         $this->authorize('update', $expediente);
 
         $datos = $request->validated();
-        $docente = \App\Models\Docente::findOrFail($datos['docente_id']);
+        $docente = Docente::findOrFail($datos['docente_id']);
 
-        \Illuminate\Support\Facades\DB::transaction(function () use ($expediente, $datos, $docente) {
+        DB::transaction(function () use ($expediente, $datos, $docente) {
             $updateData = [
                 'docente_id' => $docente->id,
                 'grado' => $docente->grado,
@@ -344,6 +348,7 @@ class ExpedienteController extends Controller
     {
         $this->authorize('delete', $expediente);
         $expediente->delete(); // Soft delete
+
         return response()->noContent();
     }
 

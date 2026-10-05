@@ -15,6 +15,8 @@ final class TokensConocidos
         'CIUDAD',
         'FECHA_CARTA_VRIN',
         'NUMERO_CARTA_VRIN',
+        'ASUNTO_CARTA',
+        'FECHA_ACEPTACION',
         'GRADO',
         'NOMBRES',
         'APELLIDO_PATERNO',

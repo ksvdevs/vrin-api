@@ -18,6 +18,7 @@ class CartaVrin extends Model
         'anio',
         'fecha',
         'ciudad',
+        'asunto',
         'estado',
         'emitida_por',
     ];

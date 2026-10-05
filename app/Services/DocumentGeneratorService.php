@@ -109,6 +109,7 @@ class DocumentGeneratorService
             'docx_path' => $rutaFinal,
             'pdf_path' => null,
             'sha256' => hash_file('sha256', $this->rutaAbsoluta($rutaFinal)),
+            'codigo_verificacion' => $this->generarCodigoVerificacion(),
             'es_vigente' => true,
             'generado_por' => $actor->id,
             'generado_at' => now(),
@@ -155,6 +156,15 @@ class DocumentGeneratorService
         ];
 
         return array_merge($mapa, $datosExtra);
+    }
+
+    private function generarCodigoVerificacion(): string
+    {
+        do {
+            $codigo = Str::upper(Str::random(12));
+        } while (DocumentoGenerado::where('codigo_verificacion', $codigo)->exists());
+
+        return $codigo;
     }
 
     private function escapar(mixed $valor): string
