@@ -31,6 +31,8 @@ class ExpedienteResource extends JsonResource
                 'dni' => $docente?->dni,
             ],
             'titulo' => $expediente->articulo?->titulo,
+            'base_indexadora' => $expediente->articulo?->base_indexadora,
+            'cuartil' => $expediente->articulo?->cuartil,
             'estado' => $expediente->estado,
             'etapa' => EstadoExpediente::etapa($expediente->estado),
             'badge' => EstadoExpediente::badge($expediente->estado),

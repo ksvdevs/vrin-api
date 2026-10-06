@@ -30,6 +30,8 @@ class ExpedienteController extends Controller
         $this->authorize('viewAny', Expediente::class);
 
         $filtros = $request->validate([
+            'busqueda' => ['nullable', 'string', 'max:200'],
+            'periodo' => ['nullable', 'integer', 'between:1900,2100'],
             'estado' => ['nullable', 'string', Rule::in(EstadoExpediente::todos())],
             'desde' => ['nullable', 'date'],
             'hasta' => ['nullable', 'date'],
@@ -42,6 +44,24 @@ class ExpedienteController extends Controller
 
         if (! empty($filtros['estado'])) {
             $expedientes->where('estado', $filtros['estado']);
+        }
+
+        if (! empty($filtros['periodo'])) {
+            $expedientes->whereYear('created_at', $filtros['periodo']);
+        }
+
+        foreach (preg_split('/\s+/u', trim($filtros['busqueda'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) as $palabra) {
+            $expedientes->where(function ($consulta) use ($palabra) {
+                $patron = '%'.$palabra.'%';
+                $consulta->where('codigo', 'like', $patron)
+                    ->orWhereHas('docente', function ($docente) use ($patron) {
+                        $docente->where('nombres', 'like', $patron)
+                            ->orWhere('apellido_paterno', 'like', $patron)
+                            ->orWhere('apellido_materno', 'like', $patron)
+                            ->orWhere('dni', 'like', $patron);
+                    })
+                    ->orWhereHas('articulo', fn ($articulo) => $articulo->where('titulo', 'like', $patron));
+            });
         }
 
         if (! empty($filtros['desde'])) {
