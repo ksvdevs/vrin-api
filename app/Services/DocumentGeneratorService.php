@@ -66,13 +66,13 @@ class DocumentGeneratorService
         return $documento;
     }
 
-    public function vistaPrevia(Expediente $expediente, array $datosExtra): string
+    public function vistaPrevia(Expediente $expediente, array $datosExtra, string $tipo = 'CARTA'): string
     {
         $directorio = storage_path('app/previews/'.Str::uuid());
         File::ensureDirectoryExists($directorio);
         try {
-            $docx = $directorio.'/carta.docx';
-            $this->prepararDocx($expediente, 'CARTA', $datosExtra, $docx);
+            $docx = $directorio.'/documento.docx';
+            $this->prepararDocx($expediente, $tipo, $datosExtra, $docx);
             $pdf = app(ConvertidorPdfService::class)->convertir($docx);
 
             return File::get($pdf);

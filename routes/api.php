@@ -53,6 +53,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/expedientes/{expediente}', [ExpedienteController::class, 'update']);
     Route::delete('/expedientes/{expediente}', [ExpedienteController::class, 'destroy']);
     Route::get('/expedientes/{expediente}/archivos/{archivo}', [ExpedienteController::class, 'archivo']);
+    Route::delete('/expedientes/{expediente}/archivos/{archivo}', [ExpedienteController::class, 'retirarComprobante']);
 
     // Fase 4 — Validación de Calidad (RN-01/RN-02) y subsanación (RN-12).
     Route::post('/expedientes/{expediente}/validacion', [ValidacionController::class, 'store']);
@@ -72,11 +73,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/expedientes/{expediente}/carta-vrin/preview', [CartaVrinController::class, 'preview']);
     Route::put('/expedientes/{expediente}/carta-vrin', [CartaVrinController::class, 'update']);
     Route::post('/expedientes/{expediente}/respuesta-opp', [RespuestaOppController::class, 'store']);
+    Route::put('/expedientes/{expediente}/respuesta-opp', [RespuestaOppController::class, 'update']);
+    Route::post('/expedientes/{expediente}/respuesta-opp/ocr', [OcrController::class, 'extraerCartaOpp']);
     Route::get('/expedientes/{expediente}/documentos/{documentoGenerado}', [ExpedienteController::class, 'documento']);
 
     // Fase 7 — Etapa 3: Resolución (RN-08, RN-10, RN-13) y anulación.
     Route::get('/resoluciones/sugerencia', [ResolucionController::class, 'sugerencia']);
     Route::post('/expedientes/{expediente}/resolucion/generar', [ResolucionController::class, 'generar']);
+    Route::put('/expedientes/{expediente}/resolucion', [ResolucionController::class, 'update']);
+    Route::post('/expedientes/{expediente}/resolucion/preview', [ResolucionController::class, 'preview']);
     Route::post('/expedientes/{expediente}/documentos/{documentoGenerado}/anular', [DocumentoGeneradoController::class, 'anular']);
 
     // Fase 8 — Etapa 4: Rendición.

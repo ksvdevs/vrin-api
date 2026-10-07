@@ -23,19 +23,10 @@ class ConvertDocxToPdfJob implements ShouldQueue
     {
         $documento = DocumentoGenerado::find($this->documentoGeneradoId);
 
-        if ($documento === null || $documento->pdf_path !== null) {
+        if ($documento === null) {
             return;
         }
 
-        $docx = storage_path('app/'.$documento->docx_path);
-
-        if (! is_file($docx)) {
-            throw new \RuntimeException("El DOCX no existe en disco: {$documento->docx_path}");
-        }
-
-        app(ConvertidorPdfService::class)->convertir($docx);
-
-        $documento->pdf_path = substr($documento->docx_path, 0, -strlen('.docx')).'.pdf';
-        $documento->save();
+        app(ConvertidorPdfService::class)->asegurarDisponible($documento);
     }
 }

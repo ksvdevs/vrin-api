@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Exceptions\DomainException;
+use App\Models\DocumentoGenerado;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -11,6 +13,30 @@ use Symfony\Component\Process\Process;
 
 class ConvertidorPdfService
 {
+    public function asegurarDisponible(DocumentoGenerado $documento): string
+    {
+        return DB::transaction(function () use ($documento): string {
+            $actual = DocumentoGenerado::whereKey($documento->id)->lockForUpdate()->firstOrFail();
+            $rutaDocx = storage_path('app/'.$actual->docx_path);
+            if (! is_file($rutaDocx)) {
+                throw new DomainException('No se encuentra el documento Word de esta versión.');
+            }
+
+            $rutaPdf = substr($actual->docx_path, 0, -strlen('.docx')).'.pdf';
+            $archivoPdf = storage_path('app/'.$rutaPdf);
+            if (! is_file($archivoPdf)) {
+                $this->convertir($rutaDocx);
+            }
+
+            if ($actual->pdf_path !== $rutaPdf) {
+                $actual->pdf_path = $rutaPdf;
+                $actual->save();
+            }
+
+            return $archivoPdf;
+        });
+    }
+
     public function convertir(string $docx): string
     {
         $rutaReal = realpath($docx);

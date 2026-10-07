@@ -20,6 +20,7 @@ class RendicionController extends Controller
 
         $payload = $request->validate([
             'fecha_desembolso' => ['required', 'date'],
+            'monto_desembolsado' => ['required', 'numeric', 'gt:0', 'max:9999999999.99'],
         ]);
 
         $workflow->transicionar($expediente, 'POR_RENDIR', $request->user(), $payload);
@@ -92,8 +93,11 @@ class RendicionController extends Controller
     {
         $this->authorize('cerrarRendicion', $expediente);
 
+        $rendicion = $expediente->rendicion;
+        abort_unless($rendicion && in_array($expediente->estado, ['POR_RENDIR', 'RENDICION_VENCIDA'], true), 409, 'La rendición no está abierta.');
+
         $payload = $request->validate([
-            'fecha_informe' => ['required', 'date'],
+            'fecha_informe' => ['required', 'date', 'after_or_equal:'.$rendicion->fecha_desembolso->format('Y-m-d')],
         ]);
 
         // RN-03: Exige comprobantes.

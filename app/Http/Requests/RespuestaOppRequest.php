@@ -49,6 +49,9 @@ class RespuestaOppRequest extends FormRequest
             ],
             'registro_vrin_numero' => ['required', 'string', 'max:30'],
             'registro_vrin_fecha' => ['required', 'date'],
+            'resolucion_numero' => ['nullable', 'integer', 'min:1'],
+            'resolucion_anio' => ['nullable', 'integer', 'between:2020,2100'],
+            'resolucion_fecha_emision' => ['nullable', 'date'],
         ];
     }
 

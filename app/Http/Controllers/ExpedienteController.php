@@ -9,6 +9,7 @@ use App\Models\Archivo;
 use App\Models\Docente;
 use App\Models\DocumentoGenerado;
 use App\Models\Expediente;
+use App\Services\ConvertidorPdfService;
 use App\Services\ExpedienteService;
 use App\Services\ExpedienteWorkflow;
 use App\Support\EstadoExpediente;
@@ -178,6 +179,7 @@ class ExpedienteController extends Controller
                 'registro_vrin_fecha' => $respuestaOpp->registro_vrin_fecha?->format('Y-m-d'),
                 'registrado_por' => $respuestaOpp->registrador?->nombre,
             ] : null,
+            'resolucion_borrador' => $expediente->resolucion_borrador,
             'resolucion' => $resolucion ? [
                 'numero' => $resolucion->numero,
                 'anio' => $resolucion->anio,
@@ -187,7 +189,9 @@ class ExpedienteController extends Controller
             ] : null,
             'rendicion' => $rendicion ? [
                 'fecha_desembolso' => $rendicion->fecha_desembolso?->format('Y-m-d'),
+                'monto_desembolsado' => $rendicion->monto_desembolsado !== null ? (float) $rendicion->monto_desembolsado : null,
                 'fecha_limite' => $rendicion->fecha_limite?->format('Y-m-d'),
+                'dias_habiles_restantes' => $rendicion->dias_habiles_restantes,
                 'fecha_informe' => $rendicion->fecha_informe?->format('Y-m-d'),
                 'estado' => $rendicion->estado,
                 'con_retraso' => $rendicion->con_retraso,
@@ -250,13 +254,9 @@ class ExpedienteController extends Controller
             );
         }
 
-        if ($documentoGenerado->pdf_path === null) {
-            abort(404, 'El PDF aún no está disponible (conversión en curso).');
-        }
-
         return $this->respuestaArchivo(
-            storage_path('app/'.$documentoGenerado->pdf_path),
-            basename($documentoGenerado->pdf_path),
+            app(ConvertidorPdfService::class)->asegurarDisponible($documentoGenerado),
+            basename($documentoGenerado->docx_path, '.docx').'.pdf',
             'application/pdf',
             $request->boolean('descargar')
         );
@@ -268,12 +268,22 @@ class ExpedienteController extends Controller
 
         $respuesta = new BinaryFileResponse($ruta);
         $respuesta->headers->set('Content-Type', $mime);
-        $respuesta->headers->set('Content-Disposition', $respuesta->headers->makeDisposition(
-            $descargar ? ResponseHeaderBag::DISPOSITION_ATTACHMENT : ResponseHeaderBag::DISPOSITION_INLINE,
-            $nombre
-        ));
+        $respuesta->headers->set('Content-Disposition', $this->disposicionArchivo($respuesta, $nombre, $descargar));
 
         return $respuesta;
+    }
+
+    private function disposicionArchivo(BinaryFileResponse $respuesta, string $nombre, bool $descargar): string
+    {
+        $nombre = basename(str_replace('\\', '/', $nombre));
+        $nombreAlternativo = preg_replace('/[^\x20-\x7E]/', '_', Str::ascii($nombre));
+        $nombreAlternativo = str_replace('%', '_', $nombreAlternativo ?: 'documento');
+
+        return $respuesta->headers->makeDisposition(
+            $descargar ? ResponseHeaderBag::DISPOSITION_ATTACHMENT : ResponseHeaderBag::DISPOSITION_INLINE,
+            $nombre,
+            $nombreAlternativo
+        );
     }
 
     // Fase 4 — Subsanación (RN-12): OBSERVADO → EN_REVISION_CALIDAD vía workflow.
@@ -302,12 +312,26 @@ class ExpedienteController extends Controller
 
         $respuesta = new BinaryFileResponse($ruta);
         $respuesta->headers->set('Content-Type', $archivo->mime ?: 'application/octet-stream');
-        $respuesta->headers->set('Content-Disposition', $respuesta->headers->makeDisposition(
-            $request->boolean('descargar') ? ResponseHeaderBag::DISPOSITION_ATTACHMENT : ResponseHeaderBag::DISPOSITION_INLINE,
+        $respuesta->headers->set('Content-Disposition', $this->disposicionArchivo(
+            $respuesta,
             $archivo->nombre_original,
+            $request->boolean('descargar'),
         ));
 
         return $respuesta;
+    }
+
+    public function retirarComprobante(Expediente $expediente, Archivo $archivo)
+    {
+        $this->authorize('subirArchivo', $expediente);
+
+        abort_unless($archivo->expediente_id === $expediente->id && $archivo->tipo === 'COMPROBANTE_RENDICION', 404);
+        abort_unless(in_array($expediente->estado, ['POR_RENDIR', 'RENDICION_VENCIDA'], true), 409, 'La rendición ya no admite cambios.');
+
+        // Se conserva el archivo físico y el registro para trazabilidad.
+        $archivo->delete();
+
+        return response()->noContent();
     }
 
     public function store(RegistrarExpedienteRequest $request, ExpedienteService $servicio)
@@ -380,6 +404,10 @@ class ExpedienteController extends Controller
         $archivoSubido = $request->file('archivo');
         $tipo = $request->validated('tipo') ?? 'CARTA_DOCENTE';
         $etapa = $request->validated('etapa') ?? SubirArchivoRequest::ETAPA_POR_TIPO[$tipo];
+
+        if ($tipo === 'COMPROBANTE_RENDICION') {
+            abort_unless(in_array($expediente->estado, ['POR_RENDIR', 'RENDICION_VENCIDA'], true), 409, 'Registre el desembolso antes de adjuntar comprobantes.');
+        }
 
         // Metadatos ANTES del move(): el temporal desaparece al moverlo.
         $sha256 = hash_file('sha256', $archivoSubido->getRealPath());

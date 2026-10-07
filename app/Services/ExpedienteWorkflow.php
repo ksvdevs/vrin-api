@@ -211,6 +211,9 @@ class ExpedienteWorkflow
                 'carta_vrin' => $this->ejecutarCartaVrin($expediente, $actor, $payload),
                 'respuesta_opp' => $this->ejecutarRespuestaOpp($expediente, $actor, $payload),
                 'resolucion' => $this->ejecutarResolucion($expediente, $actor, $payload),
+                'desembolso' => $this->ejecutarDesembolso($expediente, $actor, $payload),
+                'vencimiento' => $this->ejecutarVencimiento($expediente, $actor, $payload),
+                'cerrar_rendicion' => $this->ejecutarCerrarRendicion($expediente, $actor, $payload),
                 default => throw new DomainException("Ejecutor desconocido: {$meta['ejecutor']}."),
             };
 
@@ -282,8 +285,8 @@ class ExpedienteWorkflow
     {
         DB::transaction(function () use ($expediente, $actor, $payload): void {
             $expediente = Expediente::whereKey($expediente->id)->lockForUpdate()->firstOrFail();
-            if ($expediente->estado !== 'EN_ESPERA_OPP') {
-                throw new DomainException('Solo se puede editar la carta mientras el expediente espera la respuesta OPP.');
+            if (! in_array($expediente->estado, ['EN_ESPERA_OPP', 'DISPONIBILIDAD_CONFIRMADA', 'RESOLUCION_EMITIDA'], true)) {
+                throw new DomainException('La carta ya no se puede editar en esta etapa del expediente.');
             }
             $vigente = $expediente->documentosGenerados()->where('tipo', 'CARTA_VRIN')->where('es_vigente', true)->first();
             if (! $vigente || (int) $vigente->version !== (int) ($payload['version_actual'] ?? 0)) {
@@ -377,6 +380,12 @@ class ExpedienteWorkflow
 
         if (! $disponible) {
             $expediente->cerrado_at = now();
+        } else {
+            $expediente->resolucion_borrador = [
+                'numero' => $payload['resolucion_numero'] ?? null,
+                'anio' => $payload['resolucion_anio'] ?? null,
+                'fecha_emision' => $payload['resolucion_fecha_emision'] ?? null,
+            ];
         }
 
         return [];
@@ -405,36 +414,8 @@ class ExpedienteWorkflow
             'emitida_por' => $actor->id,
         ]);
 
-        $opp = $expediente->respuestaOpp;
-        $docente = $expediente->docente;
-        $articulo = $expediente->articulo;
-
-        $this->generator->generar($expediente, 'RESOLUCION', [
-            'numero_resolucion' => $numeroFormateado,
-            'anio' => $anio,
-            'fecha_emision' => $this->fechaLarga($fecha),
-            'NUMERO_REGISTRO_VRIN' => $opp->registro_vrin_numero,
-            'FECHA_REGISTRO_VRIN' => $this->fechaLarga(Carbon::parse($opp->registro_vrin_fecha)),
-            'TITULO_ARTICULO' => $articulo->titulo,
-            'GRADO' => $expediente->grado ?? $docente->grado,
-            'NOMBRES' => $docente->nombres,
-            'APELLIDO_PATERNO' => $docente->apellido_paterno,
-            'APELLIDO_MATERNO' => $docente->apellido_materno,
-            'CARTA_OPP' => $opp->carta_numero,
-            'FECHA_CARTA_OPP' => $this->fechaLarga(Carbon::parse($opp->carta_fecha)),
-            'CARTA_DOCENTE' => 'CARTA N° '.$expediente->carta_docente_numero,
-            'FECHA_CARTA_DOCENTE' => $this->fechaLarga(Carbon::parse($expediente->carta_docente_fecha)),
-            'REVISTA' => $articulo->revista,
-            'BASE_DATOS' => $articulo->base_indexadora,
-            'CUARTIL' => $articulo->cuartil,
-            'MONTO_TOTAL_SOLICITADO' => number_format((float) $articulo->monto_solicitado, 2, '.', ','),
-            'META' => $opp->meta_presupuestal,
-            'ESPECIFICA' => $opp->especifica_gasto,
-            'FUENTE' => $opp->fuente_financiamiento,
-            'MONTO_APROBADO' => number_format((float) $opp->monto_aprobado, 2, '.', ','),
-            'ESCUELA' => $expediente->escuela->nombre,
-            'REGLAMENTO_BASE' => config('vrin.reglamento_base'),
-        ], $actor);
+        $datos = app(DatosResolucionService::class)->construir($expediente, $numero, $anio, $fecha->format('Y-m-d'));
+        $this->generator->generar($expediente, 'RESOLUCION', $datos, $actor);
 
         return [];
     }
@@ -449,6 +430,7 @@ class ExpedienteWorkflow
         Rendicion::create([
             'expediente_id' => $expediente->id,
             'fecha_desembolso' => $fechaDesembolso->format('Y-m-d'),
+            'monto_desembolsado' => $payload['monto_desembolsado'],
             'fecha_limite' => $fechaLimite->format('Y-m-d'),
             'estado' => 'BORRADOR',
         ]);
@@ -479,7 +461,7 @@ class ExpedienteWorkflow
 
         $expediente->rendicion()->update([
             'fecha_informe' => $fechaInforme->format('Y-m-d'),
-            'estado' => 'PRESENTADA',
+            'estado' => 'CERRADA',
             'con_retraso' => $conRetraso,
             'cerrada_por' => $actor->id,
             'cerrada_at' => now(),

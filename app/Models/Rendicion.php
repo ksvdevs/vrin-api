@@ -16,6 +16,7 @@ class Rendicion extends Model
     protected $fillable = [
         'expediente_id',
         'fecha_desembolso',
+        'monto_desembolsado',
         'fecha_limite',
         'fecha_informe',
         'estado',
@@ -28,7 +29,7 @@ class Rendicion extends Model
 
     public function getDiasHabilesRestantesAttribute(): int
     {
-        if ($this->estado === 'PRESENTADA') {
+        if ($this->estado === 'CERRADA') {
             return 0;
         }
 
@@ -39,6 +40,7 @@ class Rendicion extends Model
     {
         return [
             'fecha_desembolso' => 'date',
+            'monto_desembolsado' => 'decimal:2',
             'fecha_limite' => 'date',
             'fecha_informe' => 'date',
             'con_retraso' => 'boolean',

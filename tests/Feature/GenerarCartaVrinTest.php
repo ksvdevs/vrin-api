@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Jobs\ConvertDocxToPdfJob;
+use App\Models\Archivo;
 use App\Models\CartaVrin;
 use App\Models\DocumentoGenerado;
 use App\Models\ExpedienteArticulo;
@@ -10,8 +11,10 @@ use App\Models\Rol;
 use App\Models\Usuario;
 use App\Services\ConvertidorPdfService;
 use App\Services\PlantillaProcessor;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use PhpOffice\PhpWord\IOFactory;
@@ -101,6 +104,88 @@ class GenerarCartaVrinTest extends TestCase
         $this->assertDatabaseHas('auditoria', ['expediente_id' => 1, 'accion' => 'estado.cambiado']);
     }
 
+    public function test_analiza_la_carta_opp_y_guarda_el_borrador_antes_de_generar_resolucion(): void
+    {
+        $this->postJson('/api/expedientes/1/carta-vrin', $this->datosCarta())->assertCreated();
+        config(['services.gemini.api_key' => 'test-key']);
+        Http::fake(['generativelanguage.googleapis.com/*' => Http::response([
+            'candidates' => [['content' => ['parts' => [['text' => json_encode([
+                'disponibilidad' => 'SI', 'monto_aprobado' => 1500, 'meta_presupuestal' => '017',
+                'especifica_gasto' => '2.3.27.11', 'fuente_financiamiento' => 'Recursos ordinarios',
+                'carta_numero' => '017-2026-OPP', 'carta_fecha' => '2026-10-05',
+                'registro_vrin_numero' => '1538-2026-VRIN', 'registro_vrin_fecha' => '2026-10-06',
+            ])]]]]],
+        ])]);
+
+        $this->postJson('/api/expedientes/1/respuesta-opp/ocr', [
+            'archivo' => UploadedFile::fake()->create('respuesta-opp.pdf', 100, 'application/pdf'),
+        ])->assertOk()->assertJsonPath('datos.meta_presupuestal', '017')
+            ->assertJsonPath('datos.carta_numero', '017-2026-OPP');
+
+        $this->assertDatabaseCount('respuestas_opp', 0);
+        $this->postJson('/api/expedientes/1/respuesta-opp', [
+            'disponibilidad' => 'SI', 'monto_aprobado' => 1500, 'meta_presupuestal' => '017',
+            'especifica_gasto' => '2.3.27.11', 'fuente_financiamiento' => 'Recursos ordinarios',
+            'carta_numero' => '017-2026-OPP', 'carta_fecha' => '2026-10-05',
+            'registro_vrin_numero' => '1538-2026-VRIN', 'registro_vrin_fecha' => '2026-10-06',
+            'resolucion_numero' => 13, 'resolucion_anio' => 2026, 'resolucion_fecha_emision' => '2026-10-07',
+        ])->assertCreated()->assertJsonPath('estado', 'DISPONIBILIDAD_CONFIRMADA');
+        $this->assertDatabaseHas('respuestas_opp', ['expediente_id' => 1, 'meta_presupuestal' => '017']);
+        $borrador = json_decode(DB::table('expedientes')->where('id', 1)->value('resolucion_borrador'), true);
+        $this->assertSame(13, $borrador['numero']);
+        $this->assertDatabaseCount('resoluciones', 0);
+
+        $plantilla = new PhpWord;
+        $plantilla->addSection()->addText('Resolución {{numero_resolucion}} / <<CARTA_OPP>> / <<META>>');
+        IOFactory::createWriter($plantilla, 'Word2007')->save(storage_path('app/plantillas/resolucion.docx'));
+        DB::table('tipos_documento_plantilla')->insert(['id' => 2, 'codigo' => 'RESOLUCION']);
+        DB::table('plantillas')->insert([
+            'id' => 2, 'estado' => 'ACTIVO', 'archivo_path' => 'plantillas/resolucion.docx',
+            'tokens' => json_encode(['numero_resolucion', 'CARTA_OPP', 'META']),
+        ]);
+        DB::table('plantilla_seleccionada')->insert([
+            'modulo' => 'ARTICULOS', 'tipo_documento_id' => 2, 'plantilla_id' => 2,
+        ]);
+        $this->mock(ConvertidorPdfService::class, function ($mock): void {
+            $mock->shouldReceive('convertir')->once()->andReturnUsing(function (string $docx): string {
+                $zip = new ZipArchive;
+                $this->assertTrue($zip->open($docx));
+                $xml = $zip->getFromName('word/document.xml');
+                $zip->close();
+                $this->assertStringContainsString('013', $xml);
+                $this->assertStringContainsString('017-2026-OPP', $xml);
+                $this->assertStringContainsString('017', $xml);
+                $pdf = dirname($docx).'/resolucion.pdf';
+                File::put($pdf, '%PDF-1.4 resolucion');
+
+                return $pdf;
+            });
+        });
+        $this->postJson('/api/expedientes/1/resolucion/preview', [
+            'numero' => 13, 'anio' => 2026, 'fecha_emision' => '2026-10-07',
+        ])->assertOk()->assertHeader('Content-Type', 'application/pdf');
+        $this->assertDatabaseCount('resoluciones', 0);
+        $this->assertDatabaseCount('documentos_generados', 1);
+
+        $this->putJson('/api/expedientes/1/respuesta-opp', [
+            'disponibilidad' => 'SI', 'monto_aprobado' => 1500, 'meta_presupuestal' => '018',
+            'especifica_gasto' => '2.3.27.11', 'fuente_financiamiento' => 'Recursos ordinarios',
+            'carta_numero' => '017-2026-OPP', 'carta_fecha' => '2026-10-05',
+            'registro_vrin_numero' => '1538-2026-VRIN', 'registro_vrin_fecha' => '2026-10-06',
+            'resolucion_numero' => 14, 'resolucion_anio' => 2026, 'resolucion_fecha_emision' => '2026-10-08',
+        ])->assertOk()->assertJsonPath('resolucion_borrador.numero', 14);
+        $this->assertDatabaseHas('respuestas_opp', ['expediente_id' => 1, 'meta_presupuestal' => '018']);
+
+        $this->postJson('/api/expedientes/1/resolucion/generar', [
+            'numero' => 14, 'anio' => 2026, 'fecha_emision' => '2026-10-08',
+        ])->assertCreated()->assertJsonPath('estado', 'RESOLUCION_EMITIDA');
+        $this->assertDatabaseHas('resoluciones', ['expediente_id' => 1, 'numero' => 14]);
+        $documento = DocumentoGenerado::where('tipo', 'RESOLUCION')->firstOrFail();
+        $this->assertSame('018', $documento->datos['META']);
+        $this->assertSame('014', $documento->datos['numero_resolucion']);
+        $this->assertFileExists(storage_path('app/'.$documento->docx_path));
+    }
+
     public function test_dos_cartas_reciben_codigos_de_verificacion_distintos(): void
     {
         $this->postJson('/api/expedientes/1/carta-vrin', $this->datosCarta())->assertCreated();
@@ -108,6 +193,29 @@ class GenerarCartaVrinTest extends TestCase
         $codigos = DocumentoGenerado::pluck('codigo_verificacion');
         $this->assertCount(2, $codigos);
         $this->assertCount(2, $codigos->unique());
+    }
+
+    public function test_ver_carta_genera_el_pdf_si_la_cola_aun_no_lo_convirtio(): void
+    {
+        $this->postJson('/api/expedientes/1/carta-vrin', $this->datosCarta())->assertCreated();
+        $documento = DocumentoGenerado::sole();
+        $this->assertNull($documento->pdf_path);
+
+        $this->partialMock(ConvertidorPdfService::class, function ($mock): void {
+            $mock->shouldReceive('convertir')->once()->andReturnUsing(function (string $docx): string {
+                $pdf = substr($docx, 0, -strlen('.docx')).'.pdf';
+                File::put($pdf, '%PDF-1.4 carta generada');
+
+                return $pdf;
+            });
+        });
+
+        $ruta = "/api/expedientes/1/documentos/{$documento->id}?formato=pdf";
+        $this->get($ruta)->assertOk()->assertHeader('Content-Type', 'application/pdf');
+        $this->assertNotNull($documento->refresh()->pdf_path);
+        $this->assertFileExists(storage_path('app/'.$documento->pdf_path));
+        $this->get($ruta)->assertOk();
+        (new ConvertDocxToPdfJob($documento->id))->handle();
     }
 
     public function test_sin_plantilla_revierte_la_carta_y_el_cambio_de_etapa(): void
@@ -222,10 +330,24 @@ class GenerarCartaVrinTest extends TestCase
         $this->assertSame($this->datosCarta()['asunto'], CartaVrin::sole()->asunto);
     }
 
-    public function test_no_permite_editar_despues_de_la_respuesta_opp_ni_a_calidad(): void
+    public function test_permite_editar_la_carta_en_los_pasos_posteriores_sin_cambiar_el_estado(): void
     {
         $this->postJson('/api/expedientes/1/carta-vrin', $this->datosCarta())->assertCreated();
-        DB::table('expedientes')->where('id', 1)->update(['estado' => 'DISPONIBILIDAD_CONFIRMADA']);
+        foreach (['DISPONIBILIDAD_CONFIRMADA', 'RESOLUCION_EMITIDA'] as $indice => $estado) {
+            DB::table('expedientes')->where('id', 1)->update(['estado' => $estado, 'etapa_actual' => $indice + 2]);
+            $this->putJson('/api/expedientes/1/carta-vrin', [...$this->datosCarta(),
+                'version_actual' => $indice + 1, 'asunto' => "Edición en {$estado}",
+            ])->assertOk();
+            $this->assertDatabaseHas('expedientes', ['id' => 1, 'estado' => $estado]);
+        }
+        $this->assertDatabaseCount('documentos_generados', 3);
+        $this->assertSame(3, DocumentoGenerado::where('es_vigente', true)->sole()->version);
+    }
+
+    public function test_no_permite_editar_la_carta_tras_el_desembolso_ni_a_calidad(): void
+    {
+        $this->postJson('/api/expedientes/1/carta-vrin', $this->datosCarta())->assertCreated();
+        DB::table('expedientes')->where('id', 1)->update(['estado' => 'POR_RENDIR']);
         $this->putJson('/api/expedientes/1/carta-vrin', [...$this->datosCarta(), 'version_actual' => 1])->assertConflict();
         $usuario = new Usuario;
         $usuario->forceFill(['id' => 2]);
@@ -233,6 +355,27 @@ class GenerarCartaVrinTest extends TestCase
         $this->actingAs($usuario);
         $this->putJson('/api/expedientes/1/carta-vrin', [...$this->datosCarta(), 'version_actual' => 1])->assertForbidden();
         $this->assertDatabaseCount('documentos_generados', 1);
+    }
+
+    public function test_archivo_con_nombre_unicode_se_visualiza_y_descarga_sin_error(): void
+    {
+        $ruta = storage_path('app/archivos/carta-docente.pdf');
+        File::ensureDirectoryExists(dirname($ruta));
+        File::put($ruta, '%PDF-1.4 carta de prueba');
+        $archivo = Archivo::create([
+            'expediente_id' => 1,
+            'nombre_original' => 'CARTA_DOCENTE_N°047.pdf',
+            'storage_path' => 'archivos/carta-docente.pdf',
+            'mime' => 'application/pdf',
+        ]);
+
+        $this->get("/api/expedientes/1/archivos/{$archivo->id}")
+            ->assertOk()
+            ->assertHeader('Content-Type', 'application/pdf')
+            ->assertHeader('Content-Disposition', 'inline; filename=CARTA_DOCENTE_N047.pdf; filename*=utf-8\'\'CARTA_DOCENTE_N%C2%B0047.pdf');
+        $this->get("/api/expedientes/1/archivos/{$archivo->id}?descargar=1")
+            ->assertOk()
+            ->assertHeader('Content-Disposition', 'attachment; filename=CARTA_DOCENTE_N047.pdf; filename*=utf-8\'\'CARTA_DOCENTE_N%C2%B0047.pdf');
     }
 
     /** @return array<string, int|string> */
@@ -243,6 +386,58 @@ class GenerarCartaVrinTest extends TestCase
             'ciudad' => 'Abancay', 'registro_mp_numero' => '1392-2026',
             'asunto' => 'Solicito financiamiento para publicación de artículo', 'fecha_aceptacion' => '2026-10-02',
         ];
+    }
+
+    public function test_editar_resolucion_conserva_version_anterior_y_descarga_docx(): void
+    {
+        DB::table('expedientes')->where('id', 1)->update(['estado' => 'RESOLUCION_EMITIDA', 'etapa_actual' => 3]);
+        DB::table('respuestas_opp')->insert([
+            'expediente_id' => 1, 'disponibilidad' => 'SI', 'carta_numero' => '017-OPP',
+            'carta_fecha' => '2026-10-05', 'monto_aprobado' => 1500, 'meta_presupuestal' => '017',
+            'especifica_gasto' => '2.3', 'fuente_financiamiento' => 'Recursos ordinarios',
+            'registro_vrin_numero' => '1538-VRIN', 'registro_vrin_fecha' => '2026-10-06', 'registrado_por' => 1,
+        ]);
+        DB::table('resoluciones')->insert([
+            'expediente_id' => 1, 'numero' => 13, 'anio' => 2026,
+            'fecha_emision' => '2026-10-07', 'estado' => 'EMITIDA', 'emitida_por' => 1,
+        ]);
+        $word = new PhpWord;
+        $word->addSection()->addText('Resolución <<numero_resolucion>> / <<CARTA_OPP>> / <<META>>');
+        IOFactory::createWriter($word, 'Word2007')->save(storage_path('app/plantillas/resolucion.docx'));
+        DB::table('tipos_documento_plantilla')->insert(['id' => 2, 'codigo' => 'RESOLUCION']);
+        DB::table('plantillas')->insert([
+            'id' => 2, 'estado' => 'ACTIVO', 'archivo_path' => 'plantillas/resolucion.docx',
+            'tokens' => json_encode(['numero_resolucion', 'CARTA_OPP', 'META']),
+        ]);
+        DB::table('plantilla_seleccionada')->insert([
+            'modulo' => 'ARTICULOS', 'tipo_documento_id' => 2, 'plantilla_id' => 2,
+        ]);
+        DB::table('documentos_generados')->insert([
+            'expediente_id' => 1, 'tipo' => 'RESOLUCION', 'version' => 1, 'plantilla_id' => 2,
+            'datos' => json_encode([]), 'docx_path' => 'documentos/1/anterior.docx',
+            'sha256' => str_repeat('0', 64), 'codigo_verificacion' => 'TESTANTERIOR',
+            'es_vigente' => true, 'generado_por' => 1, 'generado_at' => now(),
+        ]);
+
+        $this->putJson('/api/expedientes/1/respuesta-opp', [
+            'disponibilidad' => 'SI', 'carta_numero' => '018-OPP', 'carta_fecha' => '2026-10-08',
+            'monto_aprobado' => 1500, 'meta_presupuestal' => '018', 'especifica_gasto' => '2.3',
+            'fuente_financiamiento' => 'Recursos ordinarios', 'registro_vrin_numero' => '1538-VRIN',
+            'registro_vrin_fecha' => '2026-10-08', 'resolucion_numero' => 13,
+            'resolucion_anio' => 2026, 'resolucion_fecha_emision' => '2026-10-09',
+        ])->assertOk();
+
+        $respuesta = $this->putJson('/api/expedientes/1/resolucion', [
+            'numero' => 13, 'anio' => 2026, 'fecha_emision' => '2026-10-09',
+        ]);
+        $respuesta->assertOk()->assertJsonPath('documento_generado.version', 2);
+        $this->assertDatabaseHas('documentos_generados', ['expediente_id' => 1, 'tipo' => 'RESOLUCION', 'version' => 1, 'es_vigente' => false]);
+        $this->assertDatabaseHas('documentos_generados', ['expediente_id' => 1, 'tipo' => 'RESOLUCION', 'version' => 2, 'es_vigente' => true]);
+        $this->assertDatabaseHas('resoluciones', ['expediente_id' => 1, 'fecha_emision' => '2026-10-09']);
+
+        $documentoId = $respuesta->json('documento_generado.id');
+        $this->get("/api/expedientes/1/documentos/{$documentoId}?formato=docx")
+            ->assertOk()->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     }
 
     private function crearDatos(): void
@@ -287,7 +482,7 @@ class GenerarCartaVrinTest extends TestCase
             CREATE TABLE expedientes (
                 id INTEGER PRIMARY KEY, docente_id INTEGER, escuela_id INTEGER, grado TEXT,
                 carta_docente_numero TEXT, carta_docente_fecha TEXT, registro_mp_numero TEXT,
-                estado TEXT, etapa_actual INTEGER, documentos_completos INTEGER,
+                estado TEXT, etapa_actual INTEGER, documentos_completos INTEGER, resolucion_borrador TEXT,
                 created_at TEXT, updated_at TEXT, deleted_at TEXT
             );
             CREATE TABLE expediente_articulos (
@@ -299,6 +494,13 @@ class GenerarCartaVrinTest extends TestCase
                 ciudad TEXT, asunto TEXT, estado TEXT, emitida_por INTEGER, created_at TEXT, updated_at TEXT,
                 UNIQUE (anio, numero)
             );
+            CREATE TABLE respuestas_opp (
+                expediente_id INTEGER PRIMARY KEY, disponibilidad TEXT, carta_numero TEXT, carta_fecha TEXT,
+                monto_aprobado NUMERIC, meta_presupuestal TEXT, especifica_gasto TEXT,
+                fuente_financiamiento TEXT, registro_vrin_numero TEXT, registro_vrin_fecha TEXT,
+                registrado_por INTEGER, created_at TEXT, updated_at TEXT
+            );
+            CREATE TABLE resoluciones (expediente_id INTEGER PRIMARY KEY, numero INTEGER, anio INTEGER, fecha_emision TEXT, estado TEXT, emitida_por INTEGER, created_at TEXT, updated_at TEXT);
             CREATE TABLE tipos_documento_plantilla (id INTEGER PRIMARY KEY, codigo TEXT);
             CREATE TABLE plantillas (id INTEGER PRIMARY KEY, estado TEXT, archivo_path TEXT, tokens TEXT);
             CREATE TABLE plantilla_seleccionada (
@@ -312,6 +514,11 @@ class GenerarCartaVrinTest extends TestCase
                 codigo_verificacion VARCHAR(12) NOT NULL UNIQUE CHECK (length(codigo_verificacion) <= 12),
                 es_vigente INTEGER NOT NULL, generado_por INTEGER NOT NULL, generado_at TEXT NOT NULL,
                 created_at TEXT, UNIQUE (expediente_id, tipo, version)
+            );
+            CREATE TABLE archivos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, expediente_id INTEGER NOT NULL,
+                nombre_original TEXT NOT NULL, storage_path TEXT NOT NULL, mime TEXT,
+                created_at TEXT, deleted_at TEXT
             );
             CREATE TABLE auditoria (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, expediente_id INTEGER, usuario_id INTEGER,

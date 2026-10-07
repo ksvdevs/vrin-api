@@ -24,6 +24,7 @@ class Expediente extends Model
         'documentos_completos',
         'estado',
         'etapa_actual',
+        'resolucion_borrador',
         'cerrado_at',
         'created_by',
         'updated_by',
@@ -35,6 +36,7 @@ class Expediente extends Model
             'carta_docente_fecha' => 'date',
             'documentos_completos' => 'boolean',
             'cerrado_at' => 'datetime',
+            'resolucion_borrador' => 'array',
         ];
     }
 

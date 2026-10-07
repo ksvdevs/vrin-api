@@ -16,7 +16,7 @@ class SubirArchivoRequest extends FormRequest
     /** Etapa por defecto de cada tipo de archivo. */
     public const ETAPA_POR_TIPO = [
         'CARTA_DOCENTE' => 1,
-        'CARTA_OPP' => 2,
+        'CARTA_OPP' => 3,
         'ANEXO' => 3,
         'COMPROBANTE_RENDICION' => 4,
     ];
@@ -30,7 +30,9 @@ class SubirArchivoRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'archivo' => ['required', 'file', 'extensions:pdf,doc,docx,jpg,jpeg,png', 'max:25600'],
+            'archivo' => ['required', 'file', $this->input('tipo') === 'COMPROBANTE_RENDICION'
+                ? 'extensions:pdf'
+                : 'extensions:pdf,doc,docx,jpg,jpeg,png', 'max:25600'],
             'tipo' => ['sometimes', 'in:'.self::TIPOS],
             'etapa' => ['sometimes', 'integer', 'between:1,4'],
         ];
