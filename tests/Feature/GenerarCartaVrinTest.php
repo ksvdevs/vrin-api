@@ -8,6 +8,7 @@ use App\Models\DocumentoGenerado;
 use App\Models\ExpedienteArticulo;
 use App\Models\Rol;
 use App\Models\Usuario;
+use App\Services\ConvertidorPdfService;
 use App\Services\PlantillaProcessor;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -120,6 +121,118 @@ class GenerarCartaVrinTest extends TestCase
             'id' => 1, 'estado' => 'VALIDADO_CALIDAD', 'etapa_actual' => 1, 'registro_mp_numero' => null,
         ]);
         Queue::assertNothingPushed();
+    }
+
+    public function test_preview_convierte_la_plantilla_con_libreoffice_real(): void
+    {
+        if (! is_file(config('vrin.soffice_path'))) {
+            $this->markTestSkipped('LibreOffice no está instalado en este entorno.');
+        }
+        $this->app->useStoragePath(str_replace(chr(92), '//', $this->almacenPrueba));
+        $respuesta = $this->postJson('/api/expedientes/1/carta-vrin/preview', $this->datosCarta());
+        $respuesta->assertOk()->assertHeader('Content-Type', 'application/pdf');
+        $this->assertStringStartsWith('%PDF-', $respuesta->getContent());
+        $this->assertDatabaseCount('documentos_generados', 0);
+        $this->assertSame([], File::directories(storage_path('app/previews')));
+    }
+
+    public function test_preview_utiliza_la_plantilla_y_no_guarda_el_expediente(): void
+    {
+        $this->mock(ConvertidorPdfService::class, function ($mock): void {
+            $mock->shouldReceive('convertir')->once()->andReturnUsing(function (string $docx): string {
+                $zip = new ZipArchive;
+                $zip->open($docx);
+                $xml = $zip->getFromName('word/document.xml');
+                $zip->close();
+                $this->assertStringContainsString('067-2026', $xml);
+                $this->assertStringContainsString('1392-2026', $xml);
+                $this->assertStringContainsString($this->datosCarta()['asunto'], $xml);
+                $pdf = dirname($docx).'/carta.pdf';
+                File::put($pdf, '%PDF-1.4 preview');
+
+                return $pdf;
+            });
+        });
+        $this->postJson('/api/expedientes/1/carta-vrin/preview', $this->datosCarta())
+            ->assertOk()->assertHeader('Content-Type', 'application/pdf');
+        $this->assertDatabaseCount('cartas_vrin', 0);
+        $this->assertDatabaseCount('documentos_generados', 0);
+        $this->assertDatabaseHas('expedientes', ['id' => 1, 'estado' => 'VALIDADO_CALIDAD', 'registro_mp_numero' => null]);
+        $this->assertSame([], File::directories(storage_path('app/previews')));
+        Queue::assertNothingPushed();
+    }
+
+    public function test_preview_conserva_entorno_del_sistema_cuando_server_solo_contiene_contexto_http(): void
+    {
+        if (PHP_OS_FAMILY !== 'Windows' || ! is_file(config('vrin.soffice_path'))) {
+            $this->markTestSkipped('Requiere LibreOffice en Windows.');
+        }
+
+        $serverAnterior = $_SERVER;
+        $envAnterior = $_ENV;
+        try {
+            $_SERVER = ['PATH' => getenv('PATH'), 'REQUEST_METHOD' => 'POST'];
+            $_ENV = ['APP_NAME' => 'SGR'];
+            $respuesta = $this->postJson('/api/expedientes/1/carta-vrin/preview', $this->datosCarta());
+            $respuesta->assertOk()->assertHeader('Content-Type', 'application/pdf');
+            $this->assertStringStartsWith('%PDF-', $respuesta->getContent());
+        } finally {
+            $_SERVER = $serverAnterior;
+            $_ENV = $envAnterior;
+        }
+        $this->assertDatabaseCount('documentos_generados', 0);
+        $this->assertSame([], File::directories(storage_path('app/previews')));
+    }
+
+    public function test_editar_conserva_historial_y_crea_una_unica_version_vigente(): void
+    {
+        $this->postJson('/api/expedientes/1/carta-vrin', $this->datosCarta())->assertCreated();
+        $anterior = DocumentoGenerado::firstOrFail();
+        $datos = [...$this->datosCarta(), 'version_actual' => 1, 'asunto' => 'Asunto actualizado'];
+        $this->putJson('/api/expedientes/1/carta-vrin', $datos)->assertOk();
+        $this->assertDatabaseCount('cartas_vrin', 1);
+        $this->assertDatabaseCount('documentos_generados', 2);
+        $this->assertFalse($anterior->refresh()->es_vigente);
+        $this->assertSame($this->datosCarta()['asunto'], $anterior->datos['ASUNTO_CARTA']);
+        $vigente = DocumentoGenerado::where('es_vigente', true)->sole();
+        $this->assertEquals(2, $vigente->version);
+        $this->assertSame('Asunto actualizado', $vigente->datos['ASUNTO_CARTA']);
+        $this->assertFileExists(storage_path('app/'.$anterior->docx_path));
+        $this->assertDatabaseHas('expedientes', ['id' => 1, 'estado' => 'EN_ESPERA_OPP', 'etapa_actual' => 2]);
+    }
+
+    public function test_edicion_desactualizada_o_numero_duplicado_no_reemplaza_la_carta(): void
+    {
+        $this->postJson('/api/expedientes/1/carta-vrin', $this->datosCarta())->assertCreated();
+        $this->postJson('/api/expedientes/2/carta-vrin', $this->datosCarta(68))->assertCreated();
+        $this->putJson('/api/expedientes/1/carta-vrin', [...$this->datosCarta(), 'version_actual' => 2])->assertConflict();
+        $this->putJson('/api/expedientes/1/carta-vrin', [...$this->datosCarta(68), 'version_actual' => 1])->assertConflict();
+        $this->assertDatabaseCount('documentos_generados', 2);
+        $this->assertDatabaseHas('cartas_vrin', ['expediente_id' => 1, 'numero' => 67]);
+        $this->assertEquals(2, DocumentoGenerado::where('es_vigente', true)->count());
+    }
+
+    public function test_fallo_de_generacion_conserva_la_version_vigente_y_los_datos(): void
+    {
+        $this->postJson('/api/expedientes/1/carta-vrin', $this->datosCarta())->assertCreated();
+        DB::table('plantilla_seleccionada')->delete();
+        $this->putJson('/api/expedientes/1/carta-vrin', [...$this->datosCarta(), 'version_actual' => 1, 'asunto' => 'No guardar'])->assertConflict();
+        $this->assertDatabaseCount('documentos_generados', 1);
+        $this->assertTrue(DocumentoGenerado::sole()->es_vigente);
+        $this->assertSame($this->datosCarta()['asunto'], CartaVrin::sole()->asunto);
+    }
+
+    public function test_no_permite_editar_despues_de_la_respuesta_opp_ni_a_calidad(): void
+    {
+        $this->postJson('/api/expedientes/1/carta-vrin', $this->datosCarta())->assertCreated();
+        DB::table('expedientes')->where('id', 1)->update(['estado' => 'DISPONIBILIDAD_CONFIRMADA']);
+        $this->putJson('/api/expedientes/1/carta-vrin', [...$this->datosCarta(), 'version_actual' => 1])->assertConflict();
+        $usuario = new Usuario;
+        $usuario->forceFill(['id' => 2]);
+        $usuario->setRelation('rolRef', new Rol(['nombre' => 'Calidad']));
+        $this->actingAs($usuario);
+        $this->putJson('/api/expedientes/1/carta-vrin', [...$this->datosCarta(), 'version_actual' => 1])->assertForbidden();
+        $this->assertDatabaseCount('documentos_generados', 1);
     }
 
     /** @return array<string, int|string> */

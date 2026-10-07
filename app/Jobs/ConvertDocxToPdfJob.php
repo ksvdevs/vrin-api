@@ -3,9 +3,9 @@
 namespace App\Jobs;
 
 use App\Models\DocumentoGenerado;
+use App\Services\ConvertidorPdfService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Symfony\Component\Process\Process;
 
 /**
  * Convierte el DOCX generado a PDF con LibreOffice headless (D-23).
@@ -27,30 +27,13 @@ class ConvertDocxToPdfJob implements ShouldQueue
             return;
         }
 
-        $soffice = config('vrin.soffice_path');
         $docx = storage_path('app/'.$documento->docx_path);
 
         if (! is_file($docx)) {
             throw new \RuntimeException("El DOCX no existe en disco: {$documento->docx_path}");
         }
 
-        $proceso = new Process([
-            $soffice,
-            '--headless',
-            '--convert-to', 'pdf',
-            '--outdir', dirname($docx),
-            $docx,
-        ]);
-        $proceso->setTimeout(120);
-        $proceso->run();
-
-        $pdf = substr($docx, 0, -strlen('.docx')).'.pdf';
-
-        if (! $proceso->isSuccessful() || ! is_file($pdf)) {
-            throw new \RuntimeException(
-                'soffice falló: '.$proceso->getErrorOutput().' '.$proceso->getOutput()
-            );
-        }
+        app(ConvertidorPdfService::class)->convertir($docx);
 
         $documento->pdf_path = substr($documento->docx_path, 0, -strlen('.docx')).'.pdf';
         $documento->save();

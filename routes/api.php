@@ -69,6 +69,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // Fase 6 — Etapa 2: Carta VRIN→OPP (RN-09/RN-10/RN-13) y respuesta OPP (RN-06).
     Route::get('/cartas-vrin/sugerencia', [CartaVrinController::class, 'sugerencia']);
     Route::post('/expedientes/{expediente}/carta-vrin', [CartaVrinController::class, 'store']);
+    Route::post('/expedientes/{expediente}/carta-vrin/preview', [CartaVrinController::class, 'preview']);
+    Route::put('/expedientes/{expediente}/carta-vrin', [CartaVrinController::class, 'update']);
     Route::post('/expedientes/{expediente}/respuesta-opp', [RespuestaOppController::class, 'store']);
     Route::get('/expedientes/{expediente}/documentos/{documentoGenerado}', [ExpedienteController::class, 'documento']);
 

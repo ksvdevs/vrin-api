@@ -6,9 +6,13 @@ use App\Http\Requests\GenerarCartaVrinRequest;
 use App\Models\CartaVrin;
 use App\Models\DocumentoGenerado;
 use App\Models\Expediente;
+use App\Services\DocumentGeneratorService;
 use App\Services\ExpedienteWorkflow;
+use Carbon\Carbon;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 class CartaVrinController extends Controller
 {
@@ -55,5 +59,30 @@ class CartaVrinController extends Controller
             'anio' => $anio,
             'siguiente_numero' => $siguiente,
         ]);
+    }
+
+    public function preview(GenerarCartaVrinRequest $request, Expediente $expediente, DocumentGeneratorService $generator): Response
+    {
+        $this->authorize('generarCarta', $expediente);
+        $datos = $request->validated();
+        $fechaAceptacion = $datos['fecha_aceptacion'] ?? $expediente->articulo?->fecha_aceptacion;
+        $pdf = $generator->vistaPrevia($expediente, [
+            'CIUDAD' => $datos['ciudad'] ?? config('vrin.ciudad'),
+            'FECHA_CARTA_VRIN' => Carbon::parse($datos['fecha'])->locale('es')->translatedFormat('j \\d\\e F \\d\\e\\l Y'),
+            'NUMERO_CARTA_VRIN' => str_pad((string) $datos['numero'], 3, '0', STR_PAD_LEFT).'-'.$datos['anio'],
+            'REGISTRO_MESA_PARTES' => $datos['registro_mp_numero'] ?? '—',
+            'ASUNTO_CARTA' => $datos['asunto'] ?? null,
+            'FECHA_ACEPTACION' => $fechaAceptacion ? Carbon::parse($fechaAceptacion)->locale('es')->translatedFormat('j \\d\\e F \\d\\e\\l Y') : null,
+        ]);
+
+        return response($pdf, 200, ['Content-Type' => 'application/pdf', 'Cache-Control' => 'no-store']);
+    }
+
+    public function update(GenerarCartaVrinRequest $request, Expediente $expediente, ExpedienteWorkflow $workflow): JsonResponse
+    {
+        $this->authorize('generarCarta', $expediente);
+        $workflow->actualizarCarta($expediente, $request->user(), $request->validated());
+
+        return response()->json(['mensaje' => 'Nueva versión de la carta generada.']);
     }
 }

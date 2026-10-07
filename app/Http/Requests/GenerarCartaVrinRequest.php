@@ -15,6 +15,7 @@ class GenerarCartaVrinRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'version_actual' => [$this->isMethod('PUT') ? 'required' : 'sometimes', 'integer', 'min:1'],
             'numero' => ['required', 'integer', 'min:1'],
             'anio' => ['required', 'integer', 'between:2020,2100'],
             'fecha' => ['required', 'date'],

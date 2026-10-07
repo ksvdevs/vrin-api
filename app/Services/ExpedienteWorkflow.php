@@ -278,13 +278,31 @@ class ExpedienteWorkflow
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
-    private function ejecutarCartaVrin(Expediente $expediente, Usuario $actor, array $payload): array
+    public function actualizarCarta(Expediente $expediente, Usuario $actor, array $payload): void
+    {
+        DB::transaction(function () use ($expediente, $actor, $payload): void {
+            $expediente = Expediente::whereKey($expediente->id)->lockForUpdate()->firstOrFail();
+            if ($expediente->estado !== 'EN_ESPERA_OPP') {
+                throw new DomainException('Solo se puede editar la carta mientras el expediente espera la respuesta OPP.');
+            }
+            $vigente = $expediente->documentosGenerados()->where('tipo', 'CARTA_VRIN')->where('es_vigente', true)->first();
+            if (! $vigente || (int) $vigente->version !== (int) ($payload['version_actual'] ?? 0)) {
+                throw new DomainException('La carta cambió. Actualiza el expediente antes de editarla.');
+            }
+            $this->ejecutarCartaVrin($expediente, $actor, $payload, true);
+            $expediente->save();
+            $vigente->update(['es_vigente' => false]);
+        });
+    }
+
+    private function ejecutarCartaVrin(Expediente $expediente, Usuario $actor, array $payload, bool $editar = false): array
     {
         $numero = (int) $payload['numero'];
         $anio = (int) $payload['anio'];
         $numeroFormateado = str_pad((string) $numero, 3, '0', STR_PAD_LEFT).'-'.$anio;
 
-        $duplicada = CartaVrin::where('anio', $anio)->where('numero', $numero)->exists();
+        $duplicada = CartaVrin::where('anio', $anio)->where('numero', $numero)
+            ->when($editar, fn ($query) => $query->where('expediente_id', '!=', $expediente->id))->exists();
 
         if ($duplicada) {
             throw new DomainException("Ya existe la carta N° {$numeroFormateado} (RN-10).");
@@ -293,7 +311,7 @@ class ExpedienteWorkflow
         $ciudad = $payload['ciudad'] ?? config('vrin.ciudad');
         $fecha = Carbon::parse($payload['fecha']);
 
-        CartaVrin::create([
+        $datosCarta = [
             'expediente_id' => $expediente->id,
             'numero' => $numero,
             'anio' => $anio,
@@ -302,7 +320,12 @@ class ExpedienteWorkflow
             'asunto' => $payload['asunto'] ?? null,
             'estado' => 'EMITIDA',
             'emitida_por' => $actor->id,
-        ]);
+        ];
+        if ($editar) {
+            $expediente->cartaVrin()->firstOrFail()->update($datosCarta);
+        } else {
+            CartaVrin::create($datosCarta);
+        }
 
         if (! empty($payload['registro_mp_numero'])) {
             // Persistido por el save() posterior de transicionar().

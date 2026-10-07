@@ -10,6 +10,7 @@ use App\Models\Expediente;
 use App\Models\PlantillaSeleccionada;
 use App\Models\TipoDocumentoPlantilla;
 use App\Models\Usuario;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 
 /**
@@ -35,6 +36,52 @@ class DocumentGeneratorService
      * @param  array<string, mixed>  $datosExtra
      */
     public function generar(Expediente $expediente, string $tipo, array $datosExtra, Usuario $actor): DocumentoGenerado
+    {
+        $tipoGenerado = self::TIPO_GENERADO[$tipo];
+        $version = (int) DocumentoGenerado::where('expediente_id', $expediente->id)->where('tipo', $tipoGenerado)->max('version') + 1;
+        $directorio = "documentos/{$expediente->id}";
+        File::ensureDirectoryExists(storage_path("app/{$directorio}"));
+        $rutaFinal = $directorio.'/'.sprintf('%s_%d_%s.docx', $tipoGenerado, $version, Str::lower(Str::random(8)));
+        [$plantilla, $mapa] = $this->prepararDocx($expediente, $tipo, $datosExtra, $this->rutaAbsoluta($rutaFinal));
+
+        $documento = DocumentoGenerado::create([
+            'expediente_id' => $expediente->id,
+            'tipo' => $tipoGenerado,
+            'version' => $version,
+            'plantilla_id' => $plantilla->id,
+            'datos' => $mapa,
+            'docx_path' => $rutaFinal,
+            'pdf_path' => null,
+            'sha256' => hash_file('sha256', $this->rutaAbsoluta($rutaFinal)),
+            'codigo_verificacion' => $this->generarCodigoVerificacion(),
+            'es_vigente' => true,
+            'generado_por' => $actor->id,
+            'generado_at' => now(),
+        ]);
+
+        ConvertDocxToPdfJob::dispatch($documento->id);
+
+        event(new DocumentoGeneradoCreado($documento, $actor));
+
+        return $documento;
+    }
+
+    public function vistaPrevia(Expediente $expediente, array $datosExtra): string
+    {
+        $directorio = storage_path('app/previews/'.Str::uuid());
+        File::ensureDirectoryExists($directorio);
+        try {
+            $docx = $directorio.'/carta.docx';
+            $this->prepararDocx($expediente, 'CARTA', $datosExtra, $docx);
+            $pdf = app(ConvertidorPdfService::class)->convertir($docx);
+
+            return File::get($pdf);
+        } finally {
+            File::deleteDirectory($directorio);
+        }
+    }
+
+    private function prepararDocx(Expediente $expediente, string $tipo, array $datosExtra, string $rutaFinal): array
     {
         $tipoDocumento = TipoDocumentoPlantilla::where('codigo', $tipo)->first();
 
@@ -62,18 +109,7 @@ class DocumentGeneratorService
             }
         }
 
-        $tipoGenerado = self::TIPO_GENERADO[$tipo];
-        $version = (int) DocumentoGenerado::where('expediente_id', $expediente->id)
-            ->where('tipo', $tipoGenerado)
-            ->max('version') + 1;
-
-        $nombreBase = sprintf('%s_%d_%s', $tipoGenerado, $version, Str::lower(Str::random(8)));
-        $directorio = "documentos/{$expediente->id}";
-        if (! is_dir(storage_path("app/{$directorio}"))) {
-            mkdir(storage_path("app/{$directorio}"), 0755, true);
-        }
-        $rutaTemporal = $this->rutaAbsoluta("{$directorio}/{$nombreBase}.tmp.docx");
-        $rutaFinal = "{$directorio}/{$nombreBase}.docx";
+        $rutaTemporal = $rutaFinal.'.tmp.docx';
 
         // Pasada 1: delimitadores << >> (cuerpo).
         PlantillaProcessor::fijarDelimitadores('<<', '>>');
@@ -95,31 +131,13 @@ class DocumentGeneratorService
             $procesador2->setValue($clave, $this->escapar($valor));
         }
 
-        $procesador2->saveAs($this->rutaAbsoluta($rutaFinal));
+        $procesador2->saveAs($rutaFinal);
         unlink($rutaTemporal);
 
-        $this->validarDocx($this->rutaAbsoluta($rutaFinal));
+        $this->validarDocx($rutaFinal);
 
-        $documento = DocumentoGenerado::create([
-            'expediente_id' => $expediente->id,
-            'tipo' => $tipoGenerado,
-            'version' => $version,
-            'plantilla_id' => $plantilla->id,
-            'datos' => $mapa,
-            'docx_path' => $rutaFinal,
-            'pdf_path' => null,
-            'sha256' => hash_file('sha256', $this->rutaAbsoluta($rutaFinal)),
-            'codigo_verificacion' => $this->generarCodigoVerificacion(),
-            'es_vigente' => true,
-            'generado_por' => $actor->id,
-            'generado_at' => now(),
-        ]);
+        return [$plantilla, $mapa];
 
-        ConvertDocxToPdfJob::dispatch($documento->id);
-
-        event(new DocumentoGeneradoCreado($documento, $actor));
-
-        return $documento;
     }
 
     /**
