@@ -105,6 +105,6 @@ class ExpedientePolicy
 
     public function delete(Usuario $user, Expediente $expediente): bool
     {
-        return in_array($user->rol_codigo, self::ROLES_REGISTRO, true);
+        return in_array($user->rol_codigo, self::ROLES_REGISTRO, true) && $expediente->estado !== 'RENDIDO';
     }
 }

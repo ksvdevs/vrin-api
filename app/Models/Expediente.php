@@ -19,6 +19,8 @@ class Expediente extends Model
         'tipo_contrato',
         'escuela_id',
         'carta_docente_numero',
+        'carta_docente_registro_numero',
+        'carta_docente_registro_fecha',
         'carta_docente_fecha',
         'registro_mp_numero',
         'documentos_completos',
@@ -34,6 +36,7 @@ class Expediente extends Model
     {
         return [
             'carta_docente_fecha' => 'date',
+            'carta_docente_registro_fecha' => 'date',
             'documentos_completos' => 'boolean',
             'cerrado_at' => 'datetime',
             'resolucion_borrador' => 'array',

@@ -30,6 +30,8 @@ class ArticuloOcrTest extends TestCase
                                 [
                                     'text' => json_encode([
                                         'carta_docente_numero' => '017-2026-CP-MVZ',
+                                        'carta_docente_registro_numero' => '1392-2026',
+                                        'carta_docente_registro_fecha' => '2026-07-23',
                                         'carta_docente_fecha' => '2026-07-14',
                                         'titulo' => 'Biopolymeric Films and Coatings',
                                         'revista' => 'Foods',
@@ -61,9 +63,11 @@ class ArticuloOcrTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('datos.carta_docente_numero', '017-2026-CP-MVZ')
+            ->assertJsonPath('datos.carta_docente_registro_numero', '1392-2026')
+            ->assertJsonPath('datos.carta_docente_registro_fecha', '2026-07-23')
             ->assertJsonPath('datos.base_indexadora', 'Scopus')
             ->assertJsonPath('nombre_archivo', 'carta.pdf')
-            ->assertJsonPath('campos_extraidos', 9);
+            ->assertJsonPath('campos_extraidos', 11);
         Http::assertSent(fn (Request $request): bool => $request->hasHeader('x-goog-api-key', 'test-key')
             && ! str_contains($request->url(), 'test-key'));
     }

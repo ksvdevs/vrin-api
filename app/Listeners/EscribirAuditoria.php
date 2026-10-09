@@ -81,6 +81,7 @@ class EscribirAuditoria
                 'usuario_id' => $evento->actor->id,
                 'entidad' => 'validaciones_calidad',
                 'entidad_id' => $evento->expediente->id,
+                'antes' => $evento->payload['validacion_anterior'] ?? null,
                 'despues' => $evento->payload['validacion'],
             ]);
         }

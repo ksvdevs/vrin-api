@@ -21,6 +21,8 @@ class GenerarCartaVrinRequest extends FormRequest
             'fecha' => ['required', 'date'],
             'ciudad' => ['nullable', 'string', 'max:60'],
             'registro_mp_numero' => ['nullable', 'string', 'max:30'],
+            'carta_docente_registro_numero' => ['nullable', 'string', 'max:80'],
+            'carta_docente_registro_fecha' => ['nullable', 'date'],
             'asunto' => ['nullable', 'string', 'max:255'],
             'fecha_aceptacion' => ['nullable', 'date'],
         ];
@@ -37,6 +39,8 @@ class GenerarCartaVrinRequest extends FormRequest
             'fecha.required' => 'La fecha de emisión de la carta es obligatoria.',
             'fecha.date' => 'La fecha de emisión no es válida.',
             'registro_mp_numero.max' => 'El registro de mesa de partes no puede superar los 30 caracteres.',
+            'carta_docente_registro_numero.max' => 'El registro de la carta docente no puede superar los 80 caracteres.',
+            'carta_docente_registro_fecha.date' => 'La fecha de registro de la carta docente no es válida.',
         ];
     }
 }

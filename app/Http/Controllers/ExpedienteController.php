@@ -116,6 +116,8 @@ class ExpedienteController extends Controller
                 $request->user(),
             ),
             'carta_docente_numero' => $expediente->carta_docente_numero,
+            'carta_docente_registro_numero' => $expediente->carta_docente_registro_numero,
+            'carta_docente_registro_fecha' => $expediente->carta_docente_registro_fecha?->format('Y-m-d'),
             'carta_docente_fecha' => $expediente->carta_docente_fecha?->format('Y-m-d'),
             'registro_mp_numero' => $expediente->registro_mp_numero,
             'cerrado_at' => $expediente->cerrado_at?->format('Y-m-d H:i:s'),
@@ -354,6 +356,7 @@ class ExpedienteController extends Controller
     public function update(RegistrarExpedienteRequest $request, Expediente $expediente)
     {
         $this->authorize('update', $expediente);
+        abort_unless(in_array($expediente->estado, ['OBSERVADO', 'EN_REVISION_CALIDAD'], true), 409, 'La solicitud ya no se puede editar después de la validación de Calidad.');
 
         $datos = $request->validated();
         $docente = Docente::findOrFail($datos['docente_id']);
@@ -365,12 +368,14 @@ class ExpedienteController extends Controller
                 'tipo_contrato' => $docente->tipo_contrato,
                 'escuela_id' => $docente->escuela_id,
                 'carta_docente_numero' => $datos['carta_docente_numero'],
+                'carta_docente_registro_numero' => $datos['carta_docente_registro_numero'],
+                'carta_docente_registro_fecha' => $datos['carta_docente_registro_fecha'],
                 'carta_docente_fecha' => $datos['carta_docente_fecha'],
             ];
 
-            if (in_array($expediente->estado, [EstadoExpediente::OBSERVADO, EstadoExpediente::EN_REVISION_CALIDAD])) {
+            if (in_array($expediente->estado, ['OBSERVADO', 'EN_REVISION_CALIDAD'], true)) {
                 $updateData['documentos_completos'] = $datos['documentos_completos'];
-                $updateData['estado'] = $datos['documentos_completos'] ? EstadoExpediente::EN_REVISION_CALIDAD : EstadoExpediente::OBSERVADO;
+                $updateData['estado'] = $datos['documentos_completos'] ? 'EN_REVISION_CALIDAD' : 'OBSERVADO';
             }
 
             $expediente->update($updateData);
@@ -405,6 +410,11 @@ class ExpedienteController extends Controller
         $tipo = $request->validated('tipo') ?? 'CARTA_DOCENTE';
         $etapa = $request->validated('etapa') ?? SubirArchivoRequest::ETAPA_POR_TIPO[$tipo];
 
+        abort_if($expediente->estado === 'RENDIDO', 409, 'El expediente rendido es de solo lectura.');
+        if ($tipo === 'CARTA_DOCENTE') {
+            abort_unless(in_array($expediente->estado, ['OBSERVADO', 'EN_REVISION_CALIDAD'], true), 409, 'La carta docente ya no se puede cambiar después de la validación de Calidad.');
+        }
+
         if ($tipo === 'COMPROBANTE_RENDICION') {
             abort_unless(in_array($expediente->estado, ['POR_RENDIR', 'RENDICION_VENCIDA'], true), 409, 'Registre el desembolso antes de adjuntar comprobantes.');
         }
@@ -412,7 +422,15 @@ class ExpedienteController extends Controller
         // Metadatos ANTES del move(): el temporal desaparece al moverlo.
         $sha256 = hash_file('sha256', $archivoSubido->getRealPath());
         $tamano = $archivoSubido->getSize();
+        $extension = strtolower($archivoSubido->getClientOriginalExtension());
         $mime = $archivoSubido->getClientMimeType();
+        if ($tipo === 'COMPROBANTE_RENDICION') {
+            $mime = match ($extension) {
+                'jpg', 'jpeg' => 'image/jpeg',
+                'png' => 'image/png',
+                default => 'application/pdf',
+            };
+        }
         $nombreOriginal = $archivoSubido->getClientOriginalName();
 
         $nombreUnico = sprintf(
@@ -420,7 +438,7 @@ class ExpedienteController extends Controller
             strtolower($tipo),
             now()->format('YmdHis'),
             Str::random(8),
-            strtolower($archivoSubido->getClientOriginalExtension())
+            $extension
         );
 
         $rutaRelativa = "expedientes/{$expediente->id}/{$nombreUnico}";

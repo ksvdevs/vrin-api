@@ -19,20 +19,25 @@ class DocenteController extends Controller
     public function index(Request $request)
     {
         $q = trim((string) $request->query('q', ''));
+        $terminos = preg_split('/\s+/u', $q, -1, PREG_SPLIT_NO_EMPTY);
+        $soloNombre = $request->boolean('solo_nombre');
 
         $docentes = Docente::query()
             ->with(['escuela.facultad'])
-            ->when($q !== '', function ($query) use ($q) {
-                // Búsqueda (autocomplete del registro): solo docentes activos, límite 20.
-                $like = '%'.addcslashes($q, '%_').'%';
-                $query->where('activo', true)
-                    ->where(function ($w) use ($like) {
-                        $w->where('dni', 'like', $like)
-                            ->orWhere('nombres', 'like', $like)
+            ->when($q !== '', function ($query) use ($terminos, $soloNombre) {
+                $query->where('activo', true);
+                foreach ($terminos as $termino) {
+                    $like = '%'.addcslashes($termino, '%_').'%';
+                    $query->where(function ($w) use ($like, $soloNombre) {
+                        $w->where('nombres', 'like', $like)
                             ->orWhere('apellido_paterno', 'like', $like)
                             ->orWhere('apellido_materno', 'like', $like);
-                    })
-                    ->limit(20);
+                        if (! $soloNombre) {
+                            $w->orWhere('dni', 'like', $like);
+                        }
+                    });
+                }
+                $query->limit(20);
             })
             ->orderByDesc('activo')
             ->orderBy('apellido_paterno')

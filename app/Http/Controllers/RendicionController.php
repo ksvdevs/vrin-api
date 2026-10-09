@@ -35,6 +35,7 @@ class RendicionController extends Controller
     public function actualizarFechaLimite(Request $request, Expediente $expediente)
     {
         $this->authorize('actualizarFechaLimite', $expediente);
+        abort_unless(in_array($expediente->estado, ['POR_RENDIR', 'RENDICION_VENCIDA'], true), 409, 'La rendición ya no se puede editar en esta etapa.');
 
         $payload = $request->validate([
             'fecha_limite' => ['required', 'date'],
@@ -70,6 +71,7 @@ class RendicionController extends Controller
     public function actualizarDoi(Request $request, Expediente $expediente)
     {
         $this->authorize('actualizarDoi', $expediente);
+        abort_unless(in_array($expediente->estado, ['POR_RENDIR', 'RENDICION_VENCIDA'], true), 409, 'La rendición ya no se puede editar en esta etapa.');
 
         $payload = $request->validate([
             'doi' => ['required', 'string', 'max:255'],
@@ -98,6 +100,7 @@ class RendicionController extends Controller
 
         $payload = $request->validate([
             'fecha_informe' => ['required', 'date', 'after_or_equal:'.$rendicion->fecha_desembolso->format('Y-m-d')],
+            'doi' => ['nullable', 'string', 'max:255'],
         ]);
 
         // RN-03: Exige comprobantes.

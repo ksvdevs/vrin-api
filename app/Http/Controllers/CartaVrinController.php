@@ -65,12 +65,19 @@ class CartaVrinController extends Controller
     {
         $this->authorize('generarCarta', $expediente);
         $datos = $request->validated();
-        $fechaAceptacion = $datos['fecha_aceptacion'] ?? $expediente->articulo?->fecha_aceptacion;
+        $fechaAceptacion = $expediente->carta_docente_registro_fecha
+            ?? $datos['carta_docente_registro_fecha']
+            ?? $datos['fecha_aceptacion']
+            ?? $expediente->articulo?->fecha_aceptacion;
         $pdf = $generator->vistaPrevia($expediente, [
             'CIUDAD' => $datos['ciudad'] ?? config('vrin.ciudad'),
             'FECHA_CARTA_VRIN' => Carbon::parse($datos['fecha'])->locale('es')->translatedFormat('j \\d\\e F \\d\\e\\l Y'),
             'NUMERO_CARTA_VRIN' => str_pad((string) $datos['numero'], 3, '0', STR_PAD_LEFT).'-'.$datos['anio'],
-            'REGISTRO_MESA_PARTES' => $datos['registro_mp_numero'] ?? '—',
+            'REGISTRO_MESA_PARTES' => $expediente->carta_docente_registro_numero
+                ?? $datos['carta_docente_registro_numero']
+                ?? $datos['registro_mp_numero']
+                ?? $expediente->registro_mp_numero
+                ?? '—',
             'ASUNTO_CARTA' => $datos['asunto'] ?? null,
             'FECHA_ACEPTACION' => $fechaAceptacion ? Carbon::parse($fechaAceptacion)->locale('es')->translatedFormat('j \\d\\e F \\d\\e\\l Y') : null,
         ]);

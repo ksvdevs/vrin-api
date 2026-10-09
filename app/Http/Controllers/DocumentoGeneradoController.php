@@ -19,6 +19,7 @@ class DocumentoGeneradoController extends Controller
         $this->authorize('anularDocumento', $expediente);
 
         abort_unless($documentoGenerado->expediente_id === $expediente->id, 404);
+        abort_unless(in_array($expediente->estado, ['EN_ESPERA_OPP', 'DISPONIBILIDAD_CONFIRMADA', 'RESOLUCION_EMITIDA'], true), 409, 'El documento ya no se puede anular en esta etapa.');
 
         if (! $documentoGenerado->es_vigente) {
             throw new DomainException('El documento ya no está vigente.');

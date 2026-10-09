@@ -65,6 +65,8 @@ class ExpedienteService
                 'tipo_contrato' => $docente->tipo_contrato,
                 'escuela_id' => $docente->escuela_id,
                 'carta_docente_numero' => $datos['carta_docente_numero'],
+                'carta_docente_registro_numero' => $datos['carta_docente_registro_numero'],
+                'carta_docente_registro_fecha' => $datos['carta_docente_registro_fecha'],
                 'carta_docente_fecha' => $datos['carta_docente_fecha'],
                 'documentos_completos' => $datos['documentos_completos'],
                 'estado' => $datos['documentos_completos'] ? 'EN_REVISION_CALIDAD' : 'OBSERVADO',

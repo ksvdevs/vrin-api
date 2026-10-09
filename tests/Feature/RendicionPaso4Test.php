@@ -31,11 +31,13 @@ class RendicionPaso4Test extends TestCase
                 estado TEXT CHECK (estado IN ('BORRADOR', 'CERRADA')),
                 con_retraso INTEGER, cerrada_por INTEGER, cerrada_at TEXT,
                 created_at TEXT, updated_at TEXT);
+            CREATE TABLE expediente_articulos (expediente_id INTEGER PRIMARY KEY, doi TEXT, updated_at TEXT);
             SQL);
         DB::table('expedientes')->insert([
             ['id' => 1, 'estado' => 'POR_RENDIR'],
             ['id' => 2, 'estado' => 'RENDIDO'],
         ]);
+        DB::table('expediente_articulos')->insert(['expediente_id' => 1, 'doi' => null]);
         DB::table('archivos')->insert([
             ['id' => 10, 'expediente_id' => 1, 'tipo' => 'COMPROBANTE_RENDICION'],
             ['id' => 11, 'expediente_id' => 1, 'tipo' => 'CARTA_DOCENTE'],
@@ -74,11 +76,16 @@ class RendicionPaso4Test extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrors('monto_desembolsado');
     }
 
-    public function test_comprobante_debe_ser_pdf_y_requiere_desembolso_registrado(): void
+    public function test_comprobante_debe_ser_pdf_jpg_o_png_y_requiere_desembolso_registrado(): void
     {
         $this->postJson('/api/expedientes/1/archivos', [
             'tipo' => 'COMPROBANTE_RENDICION',
             'archivo' => UploadedFile::fake()->create('comprobante.docx', 10),
+        ])->assertUnprocessable()->assertJsonValidationErrors('archivo');
+
+        $this->postJson('/api/expedientes/1/archivos', [
+            'tipo' => 'COMPROBANTE_RENDICION',
+            'archivo' => UploadedFile::fake()->create('comprobante.jpg', 10, 'text/plain'),
         ])->assertUnprocessable()->assertJsonValidationErrors('archivo');
 
         DB::table('expedientes')->where('id', 1)->update(['estado' => 'RESOLUCION_EMITIDA']);
@@ -86,6 +93,63 @@ class RendicionPaso4Test extends TestCase
             'tipo' => 'COMPROBANTE_RENDICION',
             'archivo' => UploadedFile::fake()->create('comprobante.pdf', 10, 'application/pdf'),
         ])->assertStatus(409);
+    }
+
+    public function test_un_expediente_rendido_no_admite_archivos_cambios_ni_eliminacion(): void
+    {
+        $this->postJson('/api/expedientes/2/archivos', [
+            'tipo' => 'COMPROBANTE_RENDICION',
+            'archivo' => UploadedFile::fake()->create('comprobante.pdf', 10, 'application/pdf'),
+        ])->assertStatus(409);
+
+        $this->patchJson('/api/expedientes/2/rendicion/fecha-limite', [
+            'fecha_limite' => '2027-01-01',
+        ])->assertStatus(409);
+
+        $this->postJson('/api/expedientes/2/rendicion/doi', [
+            'doi' => '10.1234/prueba',
+        ])->assertStatus(409);
+
+        $this->deleteJson('/api/expedientes/2')->assertForbidden();
+        $this->assertDatabaseHas('expedientes', ['id' => 2, 'estado' => 'RENDIDO']);
+    }
+
+    public function test_la_carta_docente_no_se_reemplaza_despues_de_validacion(): void
+    {
+        DB::table('expedientes')->where('id', 1)->update(['estado' => 'VALIDADO_CALIDAD']);
+
+        $this->postJson('/api/expedientes/1/archivos', [
+            'tipo' => 'CARTA_DOCENTE',
+            'archivo' => UploadedFile::fake()->create('carta.pdf', 10, 'application/pdf'),
+        ])->assertStatus(409);
+
+        $this->assertSame(1, DB::table('archivos')->where('expediente_id', 1)->where('tipo', 'CARTA_DOCENTE')->count());
+    }
+
+    public function test_los_datos_de_la_solicitud_no_se_editan_despues_de_validacion(): void
+    {
+        DB::unprepared('CREATE TABLE docentes (id INTEGER PRIMARY KEY); CREATE TABLE facultades (id INTEGER PRIMARY KEY);');
+        DB::table('docentes')->insert(['id' => 1]);
+        DB::table('facultades')->insert(['id' => 1]);
+        DB::table('expedientes')->where('id', 1)->update(['estado' => 'VALIDADO_CALIDAD']);
+
+        $datos = [
+            'carta_docente_numero' => '001-2026',
+            'carta_docente_registro_numero' => '1392-2026',
+            'carta_docente_registro_fecha' => '2026-10-09',
+            'carta_docente_fecha' => '2026-10-09',
+            'docente_id' => 1,
+            'facultad_id' => 1,
+            'titulo' => 'Artículo de prueba',
+            'revista' => 'Revista de prueba',
+            'base_indexadora' => 'Scopus',
+            'cuartil' => 'Q1',
+            'monto_solicitado' => 100,
+            'documentos_completos' => true,
+        ];
+
+        $this->putJson('/api/expedientes/1', $datos)->assertStatus(409);
+        $this->putJson('/api/expedientes/2', $datos)->assertStatus(409);
     }
 
     public function test_registra_desembolso_y_permite_cerrar_la_rendicion(): void
@@ -111,18 +175,26 @@ class RendicionPaso4Test extends TestCase
 
         $this->postJson('/api/expedientes/1/rendicion/cerrar', [
             'fecha_informe' => '2027-01-07',
+            'doi' => str_repeat('x', 256),
+        ])->assertUnprocessable()->assertJsonValidationErrors('doi');
+        $this->assertDatabaseHas('rendiciones', ['expediente_id' => 1, 'estado' => 'BORRADOR']);
+
+        $this->postJson('/api/expedientes/1/rendicion/cerrar', [
+            'fecha_informe' => '2027-01-07',
+            'doi' => '10.1234/articulo.2026',
         ])->assertOk()->assertJsonPath('estado', 'RENDIDO')
             ->assertJsonPath('rendicion.estado', 'CERRADA');
         $this->assertDatabaseHas('rendiciones', [
             'expediente_id' => 1,
             'estado' => 'CERRADA',
         ]);
+        $this->assertDatabaseHas('expediente_articulos', ['expediente_id' => 1, 'doi' => '10.1234/articulo.2026']);
         $this->postJson('/api/expedientes/1/rendicion/cerrar', [
             'fecha_informe' => '2027-01-07',
         ])->assertStatus(409);
     }
 
-    public function test_sube_visualiza_y_retira_un_comprobante_sin_borrar_el_pdf_fisico(): void
+    public function test_sube_visualiza_y_retira_comprobantes_pdf_jpg_y_png_sin_borrarlos_fisicamente(): void
     {
         $raiz = storage_path('framework/testing');
         $almacen = $raiz.'/rendicion-'.Str::uuid();
@@ -130,21 +202,29 @@ class RendicionPaso4Test extends TestCase
         $this->app->useStoragePath($almacen);
 
         try {
-            $respuesta = $this->postJson('/api/expedientes/1/archivos', [
-                'tipo' => 'COMPROBANTE_RENDICION',
-                'etapa' => 4,
-                'archivo' => UploadedFile::fake()->create('pago.pdf', 10, 'application/pdf'),
-            ])->assertCreated()->assertJsonPath('tipo', 'COMPROBANTE_RENDICION');
+            $comprobantes = [
+                [UploadedFile::fake()->create('pago.pdf', 10, 'application/pdf'), 'application/pdf'],
+                [UploadedFile::fake()->image('pago.jpg'), 'image/jpeg'],
+                [UploadedFile::fake()->image('pago.png'), 'image/png'],
+            ];
 
-            $id = $respuesta->json('id');
-            $ruta = DB::table('archivos')->where('id', $id)->value('storage_path');
-            $this->assertFileExists(storage_path('app/'.$ruta));
-            $this->get('/api/expedientes/1/archivos/'.$id)
-                ->assertOk()->assertHeader('Content-Type', 'application/pdf');
+            foreach ($comprobantes as [$archivo, $mime]) {
+                $respuesta = $this->postJson('/api/expedientes/1/archivos', [
+                    'tipo' => 'COMPROBANTE_RENDICION',
+                    'etapa' => 4,
+                    'archivo' => $archivo,
+                ])->assertCreated()->assertJsonPath('tipo', 'COMPROBANTE_RENDICION')->assertJsonPath('mime', $mime);
 
-            $this->deleteJson('/api/expedientes/1/archivos/'.$id)->assertNoContent();
-            $this->get('/api/expedientes/1/archivos/'.$id)->assertNotFound();
-            $this->assertFileExists(storage_path('app/'.$ruta));
+                $id = $respuesta->json('id');
+                $ruta = DB::table('archivos')->where('id', $id)->value('storage_path');
+                $this->assertFileExists(storage_path('app/'.$ruta));
+                $this->get('/api/expedientes/1/archivos/'.$id)
+                    ->assertOk()->assertHeader('Content-Type', $mime);
+
+                $this->deleteJson('/api/expedientes/1/archivos/'.$id)->assertNoContent();
+                $this->get('/api/expedientes/1/archivos/'.$id)->assertNotFound();
+                $this->assertFileExists(storage_path('app/'.$ruta));
+            }
         } finally {
             $rutaBase = realpath($raiz);
             $rutaAlmacen = realpath($almacen);

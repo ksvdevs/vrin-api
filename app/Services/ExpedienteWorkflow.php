@@ -64,6 +64,22 @@ class ExpedienteWorkflow
             ],
         ],
         'VALIDADO_CALIDAD' => [
+            'VALIDADO_CALIDAD' => [
+                'roles' => ['CALIDAD'],
+                'accion' => null,
+                'ejecutor' => 'validacion',
+                'fase' => 4,
+                'etapa' => 1,
+                'requiere_completos' => true,
+            ],
+            'NO_CUMPLE' => [
+                'roles' => ['CALIDAD'],
+                'accion' => null,
+                'ejecutor' => 'validacion',
+                'fase' => 4,
+                'etapa' => 1,
+                'requiere_completos' => true,
+            ],
             'EN_ESPERA_OPP' => [
                 'roles' => ['SECRETARIA', 'ADMINISTRADOR_GENERAL'],
                 'accion' => ['generar_carta', 'Generar Carta'],
@@ -71,6 +87,24 @@ class ExpedienteWorkflow
                 'fase' => 6,
                 'etapa' => 2,
                 'requiere_completos' => false,
+            ],
+        ],
+        'NO_CUMPLE' => [
+            'VALIDADO_CALIDAD' => [
+                'roles' => ['CALIDAD'],
+                'accion' => null,
+                'ejecutor' => 'validacion',
+                'fase' => 4,
+                'etapa' => 1,
+                'requiere_completos' => true,
+            ],
+            'NO_CUMPLE' => [
+                'roles' => ['CALIDAD'],
+                'accion' => null,
+                'ejecutor' => 'validacion',
+                'fase' => 4,
+                'etapa' => 1,
+                'requiere_completos' => true,
             ],
         ],
         'EN_ESPERA_OPP' => [
@@ -144,7 +178,7 @@ class ExpedienteWorkflow
     /**
      * Transiciones permitidas por (estado, rol), con su metadata de acción.
      * Incluye las declaradas cuyo ejecutor aún no existe (habilitada=false).
-     * Estados terminales (ausentes del mapa) devuelven lista vacía.
+     * Las evaluaciones ya registradas solo admiten corrección por Calidad antes de emitir la carta.
      *
      * @return array<int, array{destino: string, accion: array{clave: string, etiqueta: string}|null, habilitada: bool}>
      */
@@ -160,6 +194,13 @@ class ExpedienteWorkflow
             }
 
             if ($meta['requiere_completos'] && ! $expediente->documentos_completos) {
+                continue;
+            }
+
+            if ($meta['ejecutor'] === 'validacion'
+                && in_array($expediente->estado, ['VALIDADO_CALIDAD', 'NO_CUMPLE'], true)
+                && ($expediente->cartaVrin()->exists()
+                    || $expediente->documentosGenerados()->where('tipo', 'CARTA_VRIN')->exists())) {
                 continue;
             }
 
@@ -184,6 +225,7 @@ class ExpedienteWorkflow
     public function transicionar(Expediente $expediente, string $destino, Usuario $actor, array $payload = []): void
     {
         DB::transaction(function () use ($expediente, $destino, $actor, $payload) {
+            $expediente = Expediente::query()->lockForUpdate()->findOrFail($expediente->id);
             $origen = $expediente->estado;
             $meta = self::TRANSICIONES[$origen][$destino] ?? null;
 
@@ -236,6 +278,35 @@ class ExpedienteWorkflow
         $resultado = $destino === 'VALIDADO_CALIDAD' ? 'CUMPLE' : 'NO_CUMPLE';
         $checklist = $payload['checklist'] ?? [];
         $observacion = $payload['observacion'] ?? null;
+        $anterior = $expediente->validacionCalidad;
+        $esCorreccion = in_array($expediente->estado, ['VALIDADO_CALIDAD', 'NO_CUMPLE'], true);
+        $datosAnteriores = $anterior ? [
+            'resultado' => $anterior->resultado,
+            'checklist' => $anterior->checklist,
+            'observacion' => $anterior->observacion,
+            'validado_por' => $anterior->validado_por,
+            'validado_at' => $anterior->validado_at?->format('Y-m-d H:i:s'),
+        ] : null;
+
+        if ($esCorreccion) {
+            if ($expediente->cartaVrin()->exists() || $expediente->documentosGenerados()->where('tipo', 'CARTA_VRIN')->exists()) {
+                throw new DomainException('La evaluación ya no se puede corregir porque se generó la carta VRIN/OPP.');
+            }
+            if ($anterior === null) {
+                throw new DomainException('El expediente no tiene una evaluación previa para corregir.');
+            }
+            $motivo = trim((string) ($payload['motivo_correccion'] ?? ''));
+            if (mb_strlen($motivo) < 10 || mb_strlen($motivo) > 500) {
+                throw new DomainException('Indica un motivo de entre 10 y 500 caracteres para corregir la evaluación.');
+            }
+        }
+
+        if ($anterior !== null) {
+            $expediente->observaciones()->where('etapa', 1)->where('origen', 'CALIDAD')
+                ->whereNull('resuelta_at')->update(['resuelta_at' => now()]);
+        }
+
+        $expediente->cerrado_at = null;
 
         ValidacionCalidad::updateOrCreate(
             ['expediente_id' => $expediente->id],
@@ -257,7 +328,22 @@ class ExpedienteWorkflow
             ]);
         }
 
-        return ['validacion' => ['resultado' => $resultado, 'checklist' => $checklist]];
+        $validacionActual = [
+            'resultado' => $resultado,
+            'checklist' => $checklist,
+            'observacion' => $observacion,
+            'validado_por' => $actor->id,
+            'validado_at' => now()->format('Y-m-d H:i:s'),
+        ];
+
+        if (! $esCorreccion) {
+            return ['validacion' => $validacionActual];
+        }
+
+        return [
+            'validacion' => $validacionActual + ['motivo_correccion' => $motivo],
+            'validacion_anterior' => $datosAnteriores,
+        ];
     }
 
     /**
@@ -334,18 +420,30 @@ class ExpedienteWorkflow
             // Persistido por el save() posterior de transicionar().
             $expediente->registro_mp_numero = $payload['registro_mp_numero'];
         }
-
-        if (array_key_exists('fecha_aceptacion', $payload)) {
-            $expediente->articulo->update(['fecha_aceptacion' => $payload['fecha_aceptacion']]);
+        if (! $expediente->carta_docente_registro_numero && ! empty($payload['carta_docente_registro_numero'])) {
+            $expediente->carta_docente_registro_numero = $payload['carta_docente_registro_numero'];
+        }
+        if (! $expediente->carta_docente_registro_fecha && ! empty($payload['carta_docente_registro_fecha'])) {
+            $expediente->carta_docente_registro_fecha = $payload['carta_docente_registro_fecha'];
         }
 
-        $fechaAceptacion = $expediente->articulo->fecha_aceptacion;
+        $fechaAceptacion = $expediente->carta_docente_registro_fecha
+            ?? $payload['carta_docente_registro_fecha']
+            ?? $payload['fecha_aceptacion']
+            ?? $expediente->articulo->fecha_aceptacion;
+        if ($fechaAceptacion) {
+            $expediente->articulo->update(['fecha_aceptacion' => $fechaAceptacion]);
+        }
 
         $this->generator->generar($expediente, 'CARTA', [
             'CIUDAD' => $ciudad,
             'FECHA_CARTA_VRIN' => $this->fechaLarga($fecha),
             'NUMERO_CARTA_VRIN' => $numeroFormateado,
-            'REGISTRO_MESA_PARTES' => $payload['registro_mp_numero'] ?? '—',
+            'REGISTRO_MESA_PARTES' => $expediente->carta_docente_registro_numero
+                ?? $payload['carta_docente_registro_numero']
+                ?? $payload['registro_mp_numero']
+                ?? $expediente->registro_mp_numero
+                ?? '—',
             'ASUNTO_CARTA' => $payload['asunto'] ?? null,
             'FECHA_ACEPTACION' => $fechaAceptacion ? $this->fechaLarga(Carbon::parse($fechaAceptacion)) : null,
         ], $actor);
@@ -458,6 +556,10 @@ class ExpedienteWorkflow
         $fechaLimite = Carbon::parse($expediente->rendicion->fecha_limite);
 
         $conRetraso = $fechaInforme->greaterThan($fechaLimite);
+
+        if (array_key_exists('doi', $payload)) {
+            $expediente->articulo()->firstOrFail()->update(['doi' => $payload['doi']]);
+        }
 
         $expediente->rendicion()->update([
             'fecha_informe' => $fechaInforme->format('Y-m-d'),

@@ -104,6 +104,26 @@ class GenerarCartaVrinTest extends TestCase
         $this->assertDatabaseHas('auditoria', ['expediente_id' => 1, 'accion' => 'estado.cambiado']);
     }
 
+    public function test_el_paso_dos_guarda_el_registro_docente_faltante_y_lo_usa_en_la_carta(): void
+    {
+        $datos = $this->datosCarta();
+        unset($datos['registro_mp_numero'], $datos['fecha_aceptacion']);
+        $datos['carta_docente_registro_numero'] = 'REG-456-2026';
+        $datos['carta_docente_registro_fecha'] = '2026-10-03';
+
+        $respuesta = $this->postJson('/api/expedientes/1/carta-vrin', $datos)->assertCreated();
+
+        $this->assertDatabaseHas('expedientes', [
+            'id' => 1,
+            'carta_docente_registro_numero' => 'REG-456-2026',
+        ]);
+        $this->assertStringStartsWith('2026-10-03', (string) DB::table('expedientes')->where('id', 1)->value('carta_docente_registro_fecha'));
+        $this->assertSame('2026-10-03', ExpedienteArticulo::findOrFail(1)->fecha_aceptacion->format('Y-m-d'));
+        $documento = DocumentoGenerado::findOrFail($respuesta->json('documento_generado.id'));
+        $this->assertSame('REG-456-2026', $documento->datos['REGISTRO_MESA_PARTES']);
+        $this->assertSame('3 de octubre del 2026', $documento->datos['FECHA_ACEPTACION']);
+    }
+
     public function test_analiza_la_carta_opp_y_guarda_el_borrador_antes_de_generar_resolucion(): void
     {
         $this->postJson('/api/expedientes/1/carta-vrin', $this->datosCarta())->assertCreated();
@@ -255,13 +275,17 @@ class GenerarCartaVrinTest extends TestCase
                 $this->assertStringContainsString('067-2026', $xml);
                 $this->assertStringContainsString('1392-2026', $xml);
                 $this->assertStringContainsString($this->datosCarta()['asunto'], $xml);
+                $this->assertStringContainsString('3 de octubre del 2026', $xml);
                 $pdf = dirname($docx).'/carta.pdf';
                 File::put($pdf, '%PDF-1.4 preview');
 
                 return $pdf;
             });
         });
-        $this->postJson('/api/expedientes/1/carta-vrin/preview', $this->datosCarta())
+        $datos = $this->datosCarta();
+        unset($datos['fecha_aceptacion']);
+        $datos['carta_docente_registro_fecha'] = '2026-10-03';
+        $this->postJson('/api/expedientes/1/carta-vrin/preview', $datos)
             ->assertOk()->assertHeader('Content-Type', 'application/pdf');
         $this->assertDatabaseCount('cartas_vrin', 0);
         $this->assertDatabaseCount('documentos_generados', 0);
@@ -481,7 +505,8 @@ class GenerarCartaVrinTest extends TestCase
             CREATE TABLE escuelas (id INTEGER PRIMARY KEY, nombre TEXT);
             CREATE TABLE expedientes (
                 id INTEGER PRIMARY KEY, docente_id INTEGER, escuela_id INTEGER, grado TEXT,
-                carta_docente_numero TEXT, carta_docente_fecha TEXT, registro_mp_numero TEXT,
+                carta_docente_numero TEXT, carta_docente_registro_numero TEXT, carta_docente_registro_fecha TEXT,
+                carta_docente_fecha TEXT, registro_mp_numero TEXT,
                 estado TEXT, etapa_actual INTEGER, documentos_completos INTEGER, resolucion_borrador TEXT,
                 created_at TEXT, updated_at TEXT, deleted_at TEXT
             );

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CartaVrinController;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocenteController;
 use App\Http\Controllers\DocumentoGeneradoController;
 use App\Http\Controllers\EscuelaController;
@@ -48,6 +49,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/articulos/ocr', [OcrController::class, 'extraer']);
 
     // Fase 3 — Bandeja de expedientes y vista detalle.
+    Route::get('/panel-control', [DashboardController::class, 'index']);
+    Route::get('/panel-control/reporte', [DashboardController::class, 'reporte']);
     Route::get('/expedientes', [ExpedienteController::class, 'index']);
     Route::get('/expedientes/{expediente}', [ExpedienteController::class, 'show']);
     Route::put('/expedientes/{expediente}', [ExpedienteController::class, 'update']);
