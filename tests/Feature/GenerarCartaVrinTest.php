@@ -81,6 +81,9 @@ class GenerarCartaVrinTest extends TestCase
         ]);
 
         $documento = DocumentoGenerado::findOrFail($respuesta->json('documento_generado.id'));
+        $this->get("/api/expedientes/1/documentos/{$documento->id}?formato=docx")
+            ->assertOk()
+            ->assertHeader('Content-Disposition', 'attachment; filename=CARTA_VRIN_067-2026_v1.docx');
         $this->assertNotEmpty($documento->codigo_verificacion);
         $this->assertLessThanOrEqual(12, strlen($documento->codigo_verificacion));
         $this->assertSame('CARTA_VRIN', $documento->tipo);
@@ -231,7 +234,9 @@ class GenerarCartaVrinTest extends TestCase
         });
 
         $ruta = "/api/expedientes/1/documentos/{$documento->id}?formato=pdf";
-        $this->get($ruta)->assertOk()->assertHeader('Content-Type', 'application/pdf');
+        $this->get($ruta)->assertOk()
+            ->assertHeader('Content-Type', 'application/pdf')
+            ->assertHeader('Content-Disposition', 'inline; filename=CARTA_VRIN_067-2026_v1.pdf');
         $this->assertNotNull($documento->refresh()->pdf_path);
         $this->assertFileExists(storage_path('app/'.$documento->pdf_path));
         $this->get($ruta)->assertOk();

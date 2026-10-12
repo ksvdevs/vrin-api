@@ -22,15 +22,24 @@ class RolController extends Controller
             return response()->json(['message' => 'No autorizado.'], 403);
         }
 
+        $filtros = $request->validate([
+            'nombre' => ['sometimes', 'nullable', 'string', 'max:60'],
+            'activo' => ['sometimes', 'nullable', 'boolean'],
+            'desde' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
+            'hasta' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
+        ]);
+
         $roles = Rol::query()
             ->when(
-                $request->filled('nombre'),
-                fn ($query) => $query->whereLike('nombre', '%'.$request->input('nombre').'%')
+                ! empty($filtros['nombre']),
+                fn ($query) => $query->whereLike('nombre', '%'.$filtros['nombre'].'%')
             )
             ->when(
-                $request->has('activo') && $request->input('activo') !== null,
+                isset($filtros['activo']),
                 fn ($query) => $query->where('activo', $request->boolean('activo'))
             )
+            ->when(isset($filtros['desde']), fn ($query) => $query->whereDate('created_at', '>=', $filtros['desde']))
+            ->when(isset($filtros['hasta']), fn ($query) => $query->whereDate('created_at', '<=', $filtros['hasta']))
             ->orderByDesc('created_at')
             ->get();
 

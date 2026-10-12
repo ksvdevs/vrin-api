@@ -226,6 +226,8 @@ class ExpedienteController extends Controller
                     'id' => $documento->id,
                     'tipo' => $documento->tipo,
                     'version' => $documento->version,
+                    'nombre_archivo' => $documento->nombreArchivo(),
+                    'drive_file_id' => $documento->drive_file_id,
                     'pdf_path' => $documento->pdf_path,
                     'es_vigente' => $documento->es_vigente,
                     'generado_at' => $documento->generado_at?->format('Y-m-d H:i:s'),
@@ -250,7 +252,7 @@ class ExpedienteController extends Controller
         if ($formato === 'docx') {
             return $this->respuestaArchivo(
                 storage_path('app/'.$documentoGenerado->docx_path),
-                basename($documentoGenerado->docx_path),
+                $documentoGenerado->nombreArchivo(),
                 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                 true
             );
@@ -258,7 +260,7 @@ class ExpedienteController extends Controller
 
         return $this->respuestaArchivo(
             app(ConvertidorPdfService::class)->asegurarDisponible($documentoGenerado),
-            basename($documentoGenerado->docx_path, '.docx').'.pdf',
+            $documentoGenerado->nombreArchivo('pdf'),
             'application/pdf',
             $request->boolean('descargar')
         );

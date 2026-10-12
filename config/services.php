@@ -41,6 +41,13 @@ return [
         'redirect' => env('GOOGLE_REDIRECT_URI', '/api/auth/google/callback'),
     ],
 
+    'google_drive' => [
+        'folder_id' => env('GOOGLE_DRIVE_FOLDER_ID', '1Ps3pNZnwYAqUUlNGcWrVjuvnPxvXoRO8'),
+        'resolution_folder_id' => env('GOOGLE_DRIVE_RESOLUTION_FOLDER_ID', '1hw-xlYrDmCvKFTL6tDC9aYCeikzBeA--'),
+        'redirect' => env('GOOGLE_DRIVE_REDIRECT_URI', rtrim(env('APP_URL', 'http://localhost:8000'), '/').'/api/drive/oauth/callback'),
+        'account_email' => env('GOOGLE_DRIVE_ACCOUNT_EMAIL'),
+    ],
+
     'gemini' => [
         'api_key' => env('GEMINI_API_KEY'),
         'model' => env('GEMINI_MODEL', 'gemini-3.5-flash-lite'),

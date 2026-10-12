@@ -32,7 +32,9 @@ class DashboardController extends Controller
             'plantillas_actualizadas' => Plantilla::whereYear('updated_at', $year)->count(),
             'docentes' => Docente::count(),
             'docentes_activos' => Docente::where('activo', true)->count(),
-            'monto_financiado' => (float) Rendicion::whereYear('fecha_desembolso', $year)->sum('monto_desembolsado'),
+            'monto_financiado' => (float) Rendicion::whereHas('expediente')
+                ->whereYear('fecha_desembolso', $year)
+                ->sum('monto_desembolsado'),
             'estados' => $estados,
             'actividad' => Expediente::with('docente')
                 ->orderByDesc('updated_at')

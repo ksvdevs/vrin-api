@@ -32,7 +32,31 @@ class DocumentoGenerado extends Model
             'datos' => 'array',
             'es_vigente' => 'boolean',
             'generado_at' => 'datetime',
+            'drive_synced_at' => 'datetime',
         ];
+    }
+
+    public function nombreArchivo(string $extension = 'docx'): string
+    {
+        if ($this->tipo === 'RESOLUCION') {
+            $numero = $this->datos['numero_resolucion'] ?? null;
+            $anio = $this->datos['anio'] ?? null;
+            if (is_scalar($numero) && preg_match('/^\d{1,6}$/D', (string) $numero)
+                && is_scalar($anio) && preg_match('/^\d{4}$/D', (string) $anio)) {
+                return "RESOLUCION_{$numero}-{$anio}_v{$this->version}.{$extension}";
+            }
+        }
+
+        if ($this->tipo !== 'CARTA_VRIN') {
+            return basename($this->docx_path, '.docx').'.'.$extension;
+        }
+
+        $numero = $this->datos['NUMERO_CARTA_VRIN'] ?? null;
+        $numeroSeguro = is_string($numero) && preg_match('/^\d{1,6}-\d{4}$/D', $numero)
+            ? '_'.$numero
+            : '';
+
+        return "CARTA_VRIN{$numeroSeguro}_v{$this->version}.{$extension}";
     }
 
     public function expediente()

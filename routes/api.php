@@ -8,6 +8,7 @@ use App\Http\Controllers\DocumentoGeneradoController;
 use App\Http\Controllers\EscuelaController;
 use App\Http\Controllers\ExpedienteController;
 use App\Http\Controllers\FacultadController;
+use App\Http\Controllers\GoogleDriveController;
 use App\Http\Controllers\OcrController;
 use App\Http\Controllers\PlantillaController;
 use App\Http\Controllers\PlantillaSeleccionController;
@@ -79,6 +80,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/expedientes/{expediente}/respuesta-opp', [RespuestaOppController::class, 'update']);
     Route::post('/expedientes/{expediente}/respuesta-opp/ocr', [OcrController::class, 'extraerCartaOpp']);
     Route::get('/expedientes/{expediente}/documentos/{documentoGenerado}', [ExpedienteController::class, 'documento']);
+    Route::post('/expedientes/{expediente}/documentos/{documentoGenerado}/drive', [GoogleDriveController::class, 'upload']);
+    Route::get('/drive/status', [GoogleDriveController::class, 'status']);
+    Route::post('/drive/authorize', [GoogleDriveController::class, 'authorization']);
 
     // Fase 7 — Etapa 3: Resolución (RN-08, RN-10, RN-13) y anulación.
     Route::get('/resoluciones/sugerencia', [ResolucionController::class, 'sugerencia']);

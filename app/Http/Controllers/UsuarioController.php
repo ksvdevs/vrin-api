@@ -18,23 +18,46 @@ class UsuarioController extends Controller
             return response()->json(['message' => 'No autorizado.'], 403);
         }
 
+        $filtros = $request->validate([
+            'busqueda' => ['sometimes', 'nullable', 'string', 'max:200'],
+            'nombre' => ['sometimes', 'nullable', 'string', 'max:200'],
+            'email' => ['sometimes', 'nullable', 'string', 'max:200'],
+            'activo' => ['sometimes', 'nullable', 'boolean'],
+            'desde' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
+            'hasta' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
+        ]);
+
         $usuarios = Usuario::with('rolRef')
             ->whereNull('deleted_at')
             ->when(
-                $request->filled('nombre'),
-                fn ($query) => $query->where(function ($sub) use ($request) {
-                    $nombre = '%'.$request->input('nombre').'%';
+                ! empty($filtros['busqueda']),
+                function ($query) use ($filtros) {
+                    foreach (preg_split('/\s+/', trim($filtros['busqueda'])) as $termino) {
+                        $busqueda = '%'.$termino.'%';
+                        $query->where(fn ($sub) => $sub->whereLike('nombres', $busqueda)
+                            ->orWhereLike('apellidos', $busqueda)
+                            ->orWhereLike('email', $busqueda)
+                            ->orWhereLike('dni', $busqueda));
+                    }
+                }
+            )
+            ->when(
+                ! empty($filtros['nombre']),
+                fn ($query) => $query->where(function ($sub) use ($filtros) {
+                    $nombre = '%'.$filtros['nombre'].'%';
                     $sub->whereLike('nombres', $nombre)->orWhereLike('apellidos', $nombre);
                 })
             )
             ->when(
-                $request->filled('email'),
-                fn ($query) => $query->whereLike('email', '%'.$request->input('email').'%')
+                ! empty($filtros['email']),
+                fn ($query) => $query->whereLike('email', '%'.$filtros['email'].'%')
             )
             ->when(
-                $request->has('activo') && $request->input('activo') !== null,
+                isset($filtros['activo']),
                 fn ($query) => $query->where('activo', $request->boolean('activo'))
             )
+            ->when(isset($filtros['desde']), fn ($query) => $query->whereDate('created_at', '>=', $filtros['desde']))
+            ->when(isset($filtros['hasta']), fn ($query) => $query->whereDate('created_at', '<=', $filtros['hasta']))
             ->orderByDesc('created_at')
             ->get();
 
