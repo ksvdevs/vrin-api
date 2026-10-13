@@ -199,8 +199,7 @@ class ExpedienteWorkflow
 
             if ($meta['ejecutor'] === 'validacion'
                 && in_array($expediente->estado, ['VALIDADO_CALIDAD', 'NO_CUMPLE'], true)
-                && ($expediente->cartaVrin()->exists()
-                    || $expediente->documentosGenerados()->where('tipo', 'CARTA_VRIN')->exists())) {
+                && ($this->tieneCartaVrin($expediente) || $this->tieneDocumentoCartaVrin($expediente))) {
                 continue;
             }
 
@@ -214,6 +213,32 @@ class ExpedienteWorkflow
         }
 
         return $disponibles;
+    }
+
+    /**
+     * Usa la relación ya cargada cuando existe (bandeja, sin N+1) y cae a la
+     * consulta EXISTS original en contextos de expediente individual.
+     */
+    private function tieneCartaVrin(Expediente $expediente): bool
+    {
+        if ($expediente->relationLoaded('cartaVrin')) {
+            return $expediente->getRelation('cartaVrin') !== null;
+        }
+
+        return $expediente->cartaVrin()->exists();
+    }
+
+    /**
+     * La colección cargada puede traer cualquier tipo de documento, así que el
+     * filtro por CARTA_VRIN se aplica en memoria; sin relación cargada, EXISTS.
+     */
+    private function tieneDocumentoCartaVrin(Expediente $expediente): bool
+    {
+        if ($expediente->relationLoaded('documentosGenerados')) {
+            return $expediente->getRelation('documentosGenerados')->where('tipo', 'CARTA_VRIN')->isNotEmpty();
+        }
+
+        return $expediente->documentosGenerados()->where('tipo', 'CARTA_VRIN')->exists();
     }
 
     /**

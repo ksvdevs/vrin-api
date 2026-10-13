@@ -59,7 +59,7 @@ class UsuarioController extends Controller
             ->when(isset($filtros['desde']), fn ($query) => $query->whereDate('created_at', '>=', $filtros['desde']))
             ->when(isset($filtros['hasta']), fn ($query) => $query->whereDate('created_at', '<=', $filtros['hasta']))
             ->orderByDesc('created_at')
-            ->get();
+            ->paginate(15);
 
         return response()->json($usuarios);
     }

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Rol;
 use App\Models\Usuario;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
@@ -12,6 +13,7 @@ class DashboardResumenTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        Cache::flush();
 
         $this->assertSame('sqlite', DB::connection()->getDriverName());
         $this->assertSame(':memory:', DB::connection()->getDatabaseName());
@@ -58,5 +60,25 @@ class DashboardResumenTest extends TestCase
 
         $this->getJson('/api/panel-control?year=2025')->assertOk()
             ->assertJsonPath('monto_financiado', 25.50);
+    }
+
+    public function test_panel_reutiliza_el_resumen_del_anio_durante_la_vida_de_la_cache(): void
+    {
+        $this->getJson('/api/panel-control?year=2026')->assertOk()->assertJsonPath('expedientes', 3);
+
+        DB::table('expedientes')->insert([
+            'id' => 5,
+            'codigo' => 'ART-2026-000005',
+            'estado' => 'RENDIDO',
+            'created_at' => '2026-12-31 23:59:59',
+            'updated_at' => '2026-12-31 23:59:59',
+        ]);
+
+        $this->getJson('/api/panel-control?year=2026')->assertOk()->assertJsonPath('expedientes', 3);
+
+        Cache::forget('dashboard:2026');
+        $this->getJson('/api/panel-control?year=2026')->assertOk()
+            ->assertJsonPath('expedientes', 4)
+            ->assertJsonPath('estados.RENDIDO', 3);
     }
 }

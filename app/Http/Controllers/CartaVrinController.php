@@ -69,7 +69,7 @@ class CartaVrinController extends Controller
             ?? $datos['carta_docente_registro_fecha']
             ?? $datos['fecha_aceptacion']
             ?? $expediente->articulo?->fecha_aceptacion;
-        $pdf = $generator->vistaPrevia($expediente, [
+        $mapa = [
             'CIUDAD' => $datos['ciudad'] ?? config('vrin.ciudad'),
             'FECHA_CARTA_VRIN' => Carbon::parse($datos['fecha'])->locale('es')->translatedFormat('j \\d\\e F \\d\\e\\l Y'),
             'NUMERO_CARTA_VRIN' => str_pad((string) $datos['numero'], 3, '0', STR_PAD_LEFT).'-'.$datos['anio'],
@@ -80,9 +80,21 @@ class CartaVrinController extends Controller
                 ?? '—',
             'ASUNTO_CARTA' => $datos['asunto'] ?? null,
             'FECHA_ACEPTACION' => $fechaAceptacion ? Carbon::parse($fechaAceptacion)->locale('es')->translatedFormat('j \\d\\e F \\d\\e\\l Y') : null,
-        ]);
+        ];
 
-        return response($pdf, 200, ['Content-Type' => 'application/pdf', 'Cache-Control' => 'no-store']);
+        if ($request->query('formato') === 'pdf') {
+            $pdf = $generator->vistaPrevia($expediente, $mapa);
+
+            return response($pdf, 200, ['Content-Type' => 'application/pdf', 'Cache-Control' => 'no-store']);
+        }
+
+        $documento = $generator->vistaPreviaWord($expediente, $mapa);
+
+        return response($documento, 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'Content-Disposition' => 'attachment; filename="borrador-carta-vrin.docx"',
+            'Cache-Control' => 'no-store',
+        ]);
     }
 
     public function update(GenerarCartaVrinRequest $request, Expediente $expediente, ExpedienteWorkflow $workflow): JsonResponse

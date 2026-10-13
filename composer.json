@@ -52,6 +52,10 @@
             "@php artisan config:clear --ansi @no_additional_args",
             "@php artisan test"
         ],
+        "deploy:cache": [
+            "@php artisan config:cache --no-interaction",
+            "@php artisan route:cache --no-interaction"
+        ],
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
             "@php artisan package:discover --ansi"

@@ -13,6 +13,7 @@ use App\Services\ConvertidorPdfService;
 use App\Services\ExpedienteService;
 use App\Services\ExpedienteWorkflow;
 use App\Support\EstadoExpediente;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -40,7 +41,13 @@ class ExpedienteController extends Controller
         ]);
 
         $expedientes = Expediente::query()
-            ->with(['docente.escuela.facultad', 'articulo'])
+            ->with([
+                'docente.escuela.facultad',
+                'articulo',
+                // Evita el N+1 de transicionesDisponibles() en el resource (2 EXISTS por fila).
+                'cartaVrin:expediente_id',
+                'documentosGenerados' => fn ($consulta) => $consulta->where('tipo', 'CARTA_VRIN')->select('id', 'expediente_id', 'tipo'),
+            ])
             ->orderByDesc('created_at');
 
         if (! empty($filtros['estado'])) {
@@ -48,7 +55,8 @@ class ExpedienteController extends Controller
         }
 
         if (! empty($filtros['periodo'])) {
-            $expedientes->whereYear('created_at', $filtros['periodo']);
+            $expedientes->where('created_at', '>=', $filtros['periodo'].'-01-01')
+                ->where('created_at', '<', ($filtros['periodo'] + 1).'-01-01');
         }
 
         foreach (preg_split('/\s+/u', trim($filtros['busqueda'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) as $palabra) {
@@ -66,11 +74,11 @@ class ExpedienteController extends Controller
         }
 
         if (! empty($filtros['desde'])) {
-            $expedientes->whereDate('created_at', '>=', $filtros['desde']);
+            $expedientes->where('created_at', '>=', CarbonImmutable::parse($filtros['desde'])->startOfDay());
         }
 
         if (! empty($filtros['hasta'])) {
-            $expedientes->whereDate('created_at', '<=', $filtros['hasta']);
+            $expedientes->where('created_at', '<', CarbonImmutable::parse($filtros['hasta'])->addDay()->startOfDay());
         }
 
         return ExpedienteResource::collection($expedientes->paginate(5));
@@ -87,6 +95,7 @@ class ExpedienteController extends Controller
             'articulo',
             'validacionCalidad.validador',
             'cartaVrin.emisor',
+            'documentosGenerados' => fn ($consulta) => $consulta->with('plantilla:id,codigo,version')->orderByDesc('id'),
             'respuestaOpp.registrador',
             'resolucion.emisor',
             'rendicion.cerrador',
@@ -218,10 +227,7 @@ class ExpedienteController extends Controller
                 'resuelta_at' => $observacion->resuelta_at?->format('Y-m-d H:i:s'),
                 'created_at' => $observacion->created_at?->format('Y-m-d H:i:s'),
             ])->values(),
-            'documentos_generados' => $expediente->documentosGenerados()
-                ->with('plantilla:id,codigo,version')
-                ->orderByDesc('id')
-                ->get()
+            'documentos_generados' => $expediente->documentosGenerados
                 ->map(fn ($documento) => [
                     'id' => $documento->id,
                     'tipo' => $documento->tipo,

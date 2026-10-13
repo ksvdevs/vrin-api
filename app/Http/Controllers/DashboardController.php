@@ -8,6 +8,7 @@ use App\Models\Plantilla;
 use App\Models\Rendicion;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class DashboardController extends Controller
@@ -19,39 +20,46 @@ class DashboardController extends Controller
         $this->authorize('viewAny', Expediente::class);
         $year = $request->validate(['year' => ['nullable', 'integer', 'between:1900,2100']])['year'] ?? now()->year;
 
-        $estados = Expediente::query()
-            ->whereYear('created_at', $year)
-            ->selectRaw('estado, count(*) as total')
-            ->groupBy('estado')
-            ->pluck('total', 'estado');
+        return Cache::remember("dashboard:{$year}", 120, function () use ($year): array {
+            $inicio = "{$year}-01-01";
+            $fin = ($year + 1).'-01-01';
 
-        return [
-            'year' => $year,
-            'expedientes' => Expediente::count(),
-            'plantillas' => Plantilla::count(),
-            'plantillas_actualizadas' => Plantilla::whereYear('updated_at', $year)->count(),
-            'docentes' => Docente::count(),
-            'docentes_activos' => Docente::where('activo', true)->count(),
-            'monto_financiado' => (float) Rendicion::whereHas('expediente')
-                ->whereYear('fecha_desembolso', $year)
-                ->sum('monto_desembolsado'),
-            'estados' => $estados,
-            'actividad' => Expediente::with('docente')
-                ->orderByDesc('updated_at')
-                ->limit(3)
-                ->get()
-                ->map(fn (Expediente $expediente) => [
-                    'id' => $expediente->id,
-                    'codigo' => $expediente->codigo,
-                    'estado' => $expediente->estado,
-                    'docente' => trim(implode(' ', array_filter([
-                        $expediente->docente?->nombres,
-                        $expediente->docente?->apellido_paterno,
-                        $expediente->docente?->apellido_materno,
-                    ]))),
-                    'updated_at' => $expediente->updated_at?->toIso8601String(),
-                ]),
-        ];
+            $estados = Expediente::query()
+                ->where('created_at', '>=', $inicio)
+                ->where('created_at', '<', $fin)
+                ->selectRaw('estado, count(*) as total')
+                ->groupBy('estado')
+                ->pluck('total', 'estado');
+
+            return [
+                'year' => $year,
+                'expedientes' => Expediente::count(),
+                'plantillas' => Plantilla::count(),
+                'plantillas_actualizadas' => Plantilla::where('updated_at', '>=', $inicio)->where('updated_at', '<', $fin)->count(),
+                'docentes' => Docente::count(),
+                'docentes_activos' => Docente::where('activo', true)->count(),
+                'monto_financiado' => (float) Rendicion::whereHas('expediente')
+                    ->where('fecha_desembolso', '>=', $inicio)
+                    ->where('fecha_desembolso', '<', $fin)
+                    ->sum('monto_desembolsado'),
+                'estados' => $estados,
+                'actividad' => Expediente::with('docente')
+                    ->orderByDesc('updated_at')
+                    ->limit(3)
+                    ->get()
+                    ->map(fn (Expediente $expediente) => [
+                        'id' => $expediente->id,
+                        'codigo' => $expediente->codigo,
+                        'estado' => $expediente->estado,
+                        'docente' => trim(implode(' ', array_filter([
+                            $expediente->docente?->nombres,
+                            $expediente->docente?->apellido_paterno,
+                            $expediente->docente?->apellido_materno,
+                        ]))),
+                        'updated_at' => $expediente->updated_at?->toIso8601String(),
+                    ]),
+            ];
+        });
     }
 
     public function reporte(Request $request): StreamedResponse
@@ -65,7 +73,8 @@ class DashboardController extends Controller
             fputcsv($salida, ['Código', 'Fecha de registro', 'Docente', 'Estado', 'Monto solicitado', 'Monto desembolsado'], ';');
 
             Expediente::with(['docente', 'articulo', 'rendicion'])
-                ->whereYear('created_at', $year)
+                ->where('created_at', '>=', "{$year}-01-01")
+                ->where('created_at', '<', ($year + 1).'-01-01')
                 ->orderBy('id')
                 ->chunk(200, function ($expedientes) use ($salida): void {
                     foreach ($expedientes as $expediente) {

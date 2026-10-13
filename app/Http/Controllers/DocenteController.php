@@ -19,31 +19,63 @@ class DocenteController extends Controller
     public function index(Request $request)
     {
         $q = trim((string) $request->query('q', ''));
-        $terminos = preg_split('/\s+/u', $q, -1, PREG_SPLIT_NO_EMPTY);
         $soloNombre = $request->boolean('solo_nombre');
+
+        // Autocompletado (registro de expediente): array plano de activos, máx. 20.
+        if ($q !== '') {
+            $terminos = preg_split('/\s+/u', $q, -1, PREG_SPLIT_NO_EMPTY);
+
+            $docentes = Docente::query()
+                ->with(['escuela.facultad'])
+                ->where('activo', true)
+                ->where(function ($query) use ($terminos, $soloNombre) {
+                    foreach ($terminos as $termino) {
+                        $like = '%'.addcslashes($termino, '%_').'%';
+                        $query->where(function ($w) use ($like, $soloNombre) {
+                            $w->where('nombres', 'like', $like)
+                                ->orWhere('apellido_paterno', 'like', $like)
+                                ->orWhere('apellido_materno', 'like', $like);
+                            if (! $soloNombre) {
+                                $w->orWhere('dni', 'like', $like);
+                            }
+                        });
+                    }
+                })
+                ->orderBy('apellido_paterno')
+                ->orderBy('apellido_materno')
+                ->orderBy('nombres')
+                ->limit(20)
+                ->get();
+
+            return response()->json($docentes);
+        }
+
+        $filtros = $request->validate([
+            'busqueda' => ['sometimes', 'nullable', 'string', 'max:200'],
+            'activo' => ['sometimes', 'nullable', 'boolean'],
+            'tipo_contrato' => ['sometimes', 'nullable', 'string', 'max:30'],
+            'grado' => ['sometimes', 'nullable', 'string', 'max:30'],
+        ]);
 
         $docentes = Docente::query()
             ->with(['escuela.facultad'])
-            ->when($q !== '', function ($query) use ($terminos, $soloNombre) {
-                $query->where('activo', true);
-                foreach ($terminos as $termino) {
+            ->when(! empty($filtros['busqueda']), function ($query) use ($filtros) {
+                foreach (preg_split('/\s+/u', trim($filtros['busqueda']), -1, PREG_SPLIT_NO_EMPTY) as $termino) {
                     $like = '%'.addcslashes($termino, '%_').'%';
-                    $query->where(function ($w) use ($like, $soloNombre) {
-                        $w->where('nombres', 'like', $like)
-                            ->orWhere('apellido_paterno', 'like', $like)
-                            ->orWhere('apellido_materno', 'like', $like);
-                        if (! $soloNombre) {
-                            $w->orWhere('dni', 'like', $like);
-                        }
-                    });
+                    $query->where(fn ($w) => $w->where('nombres', 'like', $like)
+                        ->orWhere('apellido_paterno', 'like', $like)
+                        ->orWhere('apellido_materno', 'like', $like)
+                        ->orWhere('dni', 'like', $like));
                 }
-                $query->limit(20);
             })
+            ->when(isset($filtros['activo']), fn ($query) => $query->where('activo', $request->boolean('activo')))
+            ->when($filtros['tipo_contrato'] ?? null, fn ($query, $tipo) => $query->where('tipo_contrato', $tipo))
+            ->when($filtros['grado'] ?? null, fn ($query, $grado) => $query->where('grado', $grado))
             ->orderByDesc('activo')
             ->orderBy('apellido_paterno')
             ->orderBy('apellido_materno')
             ->orderBy('nombres')
-            ->get();
+            ->paginate(15);
 
         return response()->json($docentes);
     }

@@ -59,7 +59,7 @@ class DocumentGeneratorService
             'generado_at' => now(),
         ]);
 
-        ConvertDocxToPdfJob::dispatch($documento->id);
+        ConvertDocxToPdfJob::dispatch($documento->id)->afterCommit();
 
         event(new DocumentoGeneradoCreado($documento, $actor));
 
@@ -76,6 +76,21 @@ class DocumentGeneratorService
             $pdf = app(ConvertidorPdfService::class)->convertir($docx);
 
             return File::get($pdf);
+        } finally {
+            File::deleteDirectory($directorio);
+        }
+    }
+
+    public function vistaPreviaWord(Expediente $expediente, array $datosExtra): string
+    {
+        $directorio = storage_path('app/previews/'.Str::uuid());
+        File::ensureDirectoryExists($directorio);
+
+        try {
+            $docx = $directorio.'/documento.docx';
+            $this->prepararDocx($expediente, 'CARTA', $datosExtra, $docx);
+
+            return File::get($docx);
         } finally {
             File::deleteDirectory($directorio);
         }

@@ -24,6 +24,9 @@ class ListaExpedientesTest extends TestCase
                 estado TEXT, created_at TEXT, updated_at TEXT, deleted_at TEXT);
             CREATE TABLE expediente_articulos (expediente_id INTEGER PRIMARY KEY, titulo TEXT,
                 base_indexadora TEXT, cuartil TEXT);
+            CREATE TABLE cartas_vrin (expediente_id INTEGER PRIMARY KEY, deleted_at TEXT);
+            CREATE TABLE documentos_generados (id INTEGER PRIMARY KEY, expediente_id INTEGER,
+                tipo TEXT, deleted_at TEXT);
             SQL);
         DB::table('docentes')->insert([
             ['id' => 1, 'nombres' => 'Luis Ricardo', 'apellido_paterno' => 'Paredes', 'apellido_materno' => 'Quiroz', 'dni' => '41982310'],

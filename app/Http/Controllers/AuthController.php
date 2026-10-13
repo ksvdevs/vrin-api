@@ -49,4 +49,20 @@ class AuthController extends Controller
 
         return response()->json(['message' => 'Sesión cerrada.']);
     }
+
+    public function me(Request $request): JsonResponse
+    {
+        $usuario = $request->user();
+
+        if (! $usuario) {
+            return response()->json(['message' => 'No autenticado.'], 401);
+        }
+
+        $usuario->loadMissing('rolRef');
+
+        return response()->json($usuario->only(
+            'id', 'dni', 'nombres', 'apellidos', 'nombre', 'email',
+            'rol', 'rol_codigo', 'rol_id', 'activo', 'ultimo_login_at',
+        ));
+    }
 }

@@ -42,19 +42,20 @@ class ListaUsuariosTest extends TestCase
     public function test_busca_nombre_correo_y_dni_y_combina_estado_con_fechas(): void
     {
         $this->getJson('/api/usuarios?busqueda=Ana%20Quispe')
-            ->assertOk()->assertJsonCount(1)->assertJsonPath('0.id', 1);
+            ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', 1);
         $this->getJson('/api/usuarios?busqueda=example.test')
-            ->assertOk()->assertJsonCount(2);
+            ->assertOk()->assertJsonCount(2, 'data');
         $this->getJson('/api/usuarios?busqueda=87654321')
-            ->assertOk()->assertJsonCount(1)->assertJsonPath('0.id', 2);
+            ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', 2);
 
         $this->getJson('/api/usuarios?busqueda=87654321&activo=0&desde=2026-09-07&hasta=2026-09-07')
-            ->assertOk()->assertJsonCount(1)->assertJsonPath('0.id', 2);
+            ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', 2);
 
         $this->getJson('/api/usuarios?hasta=2026-09-06')
-            ->assertOk()->assertJsonCount(1)->assertJsonPath('0.id', 1);
+            ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', 1);
 
-        $this->getJson('/api/usuarios')->assertOk()->assertJsonCount(2);
+        $this->getJson('/api/usuarios')->assertOk()->assertJsonCount(2, 'data')
+            ->assertJsonPath('total', 2)->assertJsonPath('per_page', 15);
     }
 
     public function test_rechaza_fecha_invalida(): void

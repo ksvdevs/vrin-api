@@ -10,6 +10,7 @@ use App\Http\Controllers\ExpedienteController;
 use App\Http\Controllers\FacultadController;
 use App\Http\Controllers\GoogleDriveController;
 use App\Http\Controllers\OcrController;
+use App\Http\Controllers\PingController;
 use App\Http\Controllers\PlantillaController;
 use App\Http\Controllers\PlantillaSeleccionController;
 use App\Http\Controllers\RendicionController;
@@ -18,8 +19,6 @@ use App\Http\Controllers\RespuestaOppController;
 use App\Http\Controllers\RolController;
 use App\Http\Controllers\UsuarioController;
 use App\Http\Controllers\ValidacionController;
-use App\Models\Facultad;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
@@ -98,26 +97,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/expedientes/{expediente}/rendicion/cerrar', [RendicionController::class, 'cerrarRendicion']);
 
     // Usuario autenticado actual.
-    Route::get('/me', function (Request $request) {
-        $usuario = $request->user();
-
-        if (! $usuario) {
-            return response()->json(['message' => 'No autenticado.'], 401);
-        }
-
-        $usuario->loadMissing('rolRef');
-
-        return response()->json($usuario->only(
-            'id', 'dni', 'nombres', 'apellidos', 'nombre', 'email',
-            'rol', 'rol_codigo', 'rol_id', 'activo', 'ultimo_login_at',
-        ));
-    });
+    Route::get('/me', [AuthController::class, 'me']);
 });
 
 // Endpoint de humo (Fase 0): confirma API + BD importada.
-Route::get('/ping', function () {
-    return response()->json([
-        'ok' => true,
-        'db' => Facultad::count(),
-    ]);
-});
+Route::get('/ping', PingController::class);

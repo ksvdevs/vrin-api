@@ -24,15 +24,29 @@ class PlantillaController extends Controller
 
         $filtros = $request->validate([
             'tipo_documento_id' => ['nullable', 'integer', Rule::exists('tipos_documento_plantilla', 'id')],
+            'busqueda' => ['nullable', 'string', 'max:200'],
+            'estado' => ['nullable', Rule::in(['ACTIVO', 'INACTIVO'])],
+            'desde' => ['nullable', 'date_format:Y-m-d'],
+            'hasta' => ['nullable', 'date_format:Y-m-d'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
         $plantillas = Plantilla::query()
             ->with('tipoDocumento')
             ->when($filtros['tipo_documento_id'] ?? null, fn ($q, $tipo) => $q->where('tipo_documento_id', $tipo))
+            ->when(! empty($filtros['busqueda']), function ($q) use ($filtros) {
+                $like = '%'.addcslashes(trim($filtros['busqueda']), '%_').'%';
+                $q->where(fn ($w) => $w->where('codigo', 'like', $like)->orWhere('nombre', 'like', $like));
+            })
+            ->when($filtros['estado'] ?? null, fn ($q, $estado) => $q->where('estado', $estado))
+            ->when($filtros['desde'] ?? null, fn ($q, $desde) => $q->whereDate('created_at', '>=', $desde))
+            ->when($filtros['hasta'] ?? null, fn ($q, $hasta) => $q->whereDate('created_at', '<=', $hasta))
             ->orderByDesc('created_at')
-            ->get();
+            ->paginate(min((int) ($filtros['per_page'] ?? 15), 100));
 
-        return response()->json($plantillas->map(fn (Plantilla $p) => [
+        // tokens no se serializa: solo tokens_count y sin_mapeo (este último
+        // requiere los nombres de los tokens, por eso se carga la columna).
+        $plantillas->setCollection($plantillas->getCollection()->map(fn (Plantilla $p) => [
             'id' => $p->id,
             'codigo' => $p->codigo,
             'nombre' => $p->nombre,
@@ -49,6 +63,8 @@ class PlantillaController extends Controller
             'sha256' => $p->sha256,
             'created_at' => $p->created_at?->format('Y-m-d H:i:s'),
         ]));
+
+        return response()->json($plantillas);
     }
 
     // POST /plantillas — subida de una nueva versión de DOCX (inmutable).

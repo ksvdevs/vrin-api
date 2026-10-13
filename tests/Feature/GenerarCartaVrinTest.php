@@ -256,69 +256,64 @@ class GenerarCartaVrinTest extends TestCase
         Queue::assertNothingPushed();
     }
 
-    public function test_preview_convierte_la_plantilla_con_libreoffice_real(): void
+    public function test_preview_entrega_word_sin_convertir_a_pdf(): void
     {
-        if (! is_file(config('vrin.soffice_path'))) {
-            $this->markTestSkipped('LibreOffice no está instalado en este entorno.');
-        }
-        $this->app->useStoragePath(str_replace(chr(92), '//', $this->almacenPrueba));
+        $this->mock(ConvertidorPdfService::class, function ($mock): void {
+            $mock->shouldNotReceive('convertir');
+        });
         $respuesta = $this->postJson('/api/expedientes/1/carta-vrin/preview', $this->datosCarta());
-        $respuesta->assertOk()->assertHeader('Content-Type', 'application/pdf');
-        $this->assertStringStartsWith('%PDF-', $respuesta->getContent());
+        $respuesta->assertOk()->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        $this->assertStringStartsWith('PK', $respuesta->getContent());
         $this->assertDatabaseCount('documentos_generados', 0);
         $this->assertSame([], File::directories(storage_path('app/previews')));
     }
 
-    public function test_preview_utiliza_la_plantilla_y_no_guarda_el_expediente(): void
+    public function test_preview_pdf_sigue_disponible_para_mostrar_la_carta_en_el_modal(): void
     {
         $this->mock(ConvertidorPdfService::class, function ($mock): void {
             $mock->shouldReceive('convertir')->once()->andReturnUsing(function (string $docx): string {
-                $zip = new ZipArchive;
-                $zip->open($docx);
-                $xml = $zip->getFromName('word/document.xml');
-                $zip->close();
-                $this->assertStringContainsString('067-2026', $xml);
-                $this->assertStringContainsString('1392-2026', $xml);
-                $this->assertStringContainsString($this->datosCarta()['asunto'], $xml);
-                $this->assertStringContainsString('3 de octubre del 2026', $xml);
-                $pdf = dirname($docx).'/carta.pdf';
+                $pdf = substr($docx, 0, -strlen('.docx')).'.pdf';
                 File::put($pdf, '%PDF-1.4 preview');
 
                 return $pdf;
             });
         });
+
+        $respuesta = $this->postJson('/api/expedientes/1/carta-vrin/preview?formato=pdf', $this->datosCarta());
+        $respuesta->assertOk()->assertHeader('Content-Type', 'application/pdf');
+        $this->assertStringStartsWith('%PDF-', $respuesta->getContent());
+        $this->assertDatabaseCount('documentos_generados', 0);
+    }
+
+    public function test_preview_utiliza_la_plantilla_y_no_guarda_el_expediente(): void
+    {
+        $this->mock(ConvertidorPdfService::class, function ($mock): void {
+            $mock->shouldNotReceive('convertir');
+        });
         $datos = $this->datosCarta();
         unset($datos['fecha_aceptacion']);
         $datos['carta_docente_registro_fecha'] = '2026-10-03';
-        $this->postJson('/api/expedientes/1/carta-vrin/preview', $datos)
-            ->assertOk()->assertHeader('Content-Type', 'application/pdf');
+        $respuesta = $this->postJson('/api/expedientes/1/carta-vrin/preview', $datos);
+        $respuesta->assertOk()->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        $archivo = tempnam(sys_get_temp_dir(), 'carta-preview-');
+        try {
+            File::put($archivo, $respuesta->getContent());
+            $zip = new ZipArchive;
+            $this->assertTrue($zip->open($archivo));
+            $xml = $zip->getFromName('word/document.xml');
+            $zip->close();
+            $this->assertStringContainsString('067-2026', $xml);
+            $this->assertStringContainsString('1392-2026', $xml);
+            $this->assertStringContainsString($datos['asunto'], $xml);
+            $this->assertStringContainsString('3 de octubre del 2026', $xml);
+        } finally {
+            File::delete($archivo);
+        }
         $this->assertDatabaseCount('cartas_vrin', 0);
         $this->assertDatabaseCount('documentos_generados', 0);
         $this->assertDatabaseHas('expedientes', ['id' => 1, 'estado' => 'VALIDADO_CALIDAD', 'registro_mp_numero' => null]);
         $this->assertSame([], File::directories(storage_path('app/previews')));
         Queue::assertNothingPushed();
-    }
-
-    public function test_preview_conserva_entorno_del_sistema_cuando_server_solo_contiene_contexto_http(): void
-    {
-        if (PHP_OS_FAMILY !== 'Windows' || ! is_file(config('vrin.soffice_path'))) {
-            $this->markTestSkipped('Requiere LibreOffice en Windows.');
-        }
-
-        $serverAnterior = $_SERVER;
-        $envAnterior = $_ENV;
-        try {
-            $_SERVER = ['PATH' => getenv('PATH'), 'REQUEST_METHOD' => 'POST'];
-            $_ENV = ['APP_NAME' => 'SGR'];
-            $respuesta = $this->postJson('/api/expedientes/1/carta-vrin/preview', $this->datosCarta());
-            $respuesta->assertOk()->assertHeader('Content-Type', 'application/pdf');
-            $this->assertStringStartsWith('%PDF-', $respuesta->getContent());
-        } finally {
-            $_SERVER = $serverAnterior;
-            $_ENV = $envAnterior;
-        }
-        $this->assertDatabaseCount('documentos_generados', 0);
-        $this->assertSame([], File::directories(storage_path('app/previews')));
     }
 
     public function test_editar_conserva_historial_y_crea_una_unica_version_vigente(): void
