@@ -431,14 +431,14 @@ class ExpedienteController extends Controller
         $sha256 = hash_file('sha256', $archivoSubido->getRealPath());
         $tamano = $archivoSubido->getSize();
         $extension = strtolower($archivoSubido->getClientOriginalExtension());
-        $mime = $archivoSubido->getClientMimeType();
-        if ($tipo === 'COMPROBANTE_RENDICION') {
-            $mime = match ($extension) {
-                'jpg', 'jpeg' => 'image/jpeg',
-                'png' => 'image/png',
-                default => 'application/pdf',
-            };
-        }
+        $mime = match ($extension) {
+            'pdf' => 'application/pdf',
+            'jpg', 'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'doc' => 'application/msword',
+            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            default => $archivoSubido->getMimeType() ?: 'application/octet-stream',
+        };
         $nombreOriginal = $archivoSubido->getClientOriginalName();
 
         $nombreUnico = sprintf(
