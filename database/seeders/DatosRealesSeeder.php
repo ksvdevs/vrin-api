@@ -137,6 +137,7 @@ class DatosRealesSeeder extends Seeder
                     'apellido_materno' => $datos['apellido_materno'],
                     'grado' => $datos['grado'],
                     'tipo_contrato' => $datos['tipo_contrato'],
+                    'categoria' => $datos['tipo_contrato'] === 'CONTRATADO' ? 'CONTRATADO' : 'ORDINARIO_AUXILIAR',
                     'escuela_id' => $escuelaIds[$datos['escuela']],
                     'activo' => true,
                     'origen' => 'LOCAL',

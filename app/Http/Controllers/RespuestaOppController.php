@@ -56,6 +56,8 @@ class RespuestaOppController extends Controller
                 'numero' => $datos['resolucion_numero'] ?? null,
                 'anio' => $datos['resolucion_anio'] ?? null,
                 'fecha_emision' => $datos['resolucion_fecha_emision'] ?? null,
+                'carta_especialista_investigacion' => $datos['resolucion_carta_especialista_investigacion'] ?? null,
+                'fecha_carta_especialista_investigacion' => $datos['resolucion_fecha_carta_especialista_investigacion'] ?? null,
             ]]);
         });
 

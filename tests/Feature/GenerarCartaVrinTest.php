@@ -7,6 +7,7 @@ use App\Models\Archivo;
 use App\Models\CartaVrin;
 use App\Models\DocumentoGenerado;
 use App\Models\ExpedienteArticulo;
+use App\Models\Resolucion;
 use App\Models\Rol;
 use App\Models\Usuario;
 use App\Services\ConvertidorPdfService;
@@ -152,19 +153,23 @@ class GenerarCartaVrinTest extends TestCase
             'carta_numero' => '017-2026-OPP', 'carta_fecha' => '2026-10-05',
             'registro_vrin_numero' => '1538-2026-VRIN', 'registro_vrin_fecha' => '2026-10-06',
             'resolucion_numero' => 13, 'resolucion_anio' => 2026, 'resolucion_fecha_emision' => '2026-10-07',
+            'resolucion_carta_especialista_investigacion' => 'CARTA N° 042-2026',
+            'resolucion_fecha_carta_especialista_investigacion' => '2026-10-04',
         ])->assertCreated()->assertJsonPath('estado', 'DISPONIBILIDAD_CONFIRMADA');
         $this->assertDatabaseHas('respuestas_opp', ['expediente_id' => 1, 'meta_presupuestal' => '017']);
         $borrador = json_decode(DB::table('expedientes')->where('id', 1)->value('resolucion_borrador'), true);
         $this->assertSame(13, $borrador['numero']);
+        $this->assertSame('CARTA N° 042-2026', $borrador['carta_especialista_investigacion']);
+        $this->assertSame('2026-10-04', $borrador['fecha_carta_especialista_investigacion']);
         $this->assertDatabaseCount('resoluciones', 0);
 
         $plantilla = new PhpWord;
-        $plantilla->addSection()->addText('Resolución {{numero_resolucion}} / <<CARTA_OPP>> / <<META>>');
+        $plantilla->addSection()->addText('Resolución {{numero_resolucion}} / <<CARTA_OPP>> / <<META>> / <<CARTA_ESPECIALISTA_INVESTIGACION>> / <<FECHA_CARTA_ESPECIALISTA_INVESTIGACION>> / <<GENERO>> docente');
         IOFactory::createWriter($plantilla, 'Word2007')->save(storage_path('app/plantillas/resolucion.docx'));
         DB::table('tipos_documento_plantilla')->insert(['id' => 2, 'codigo' => 'RESOLUCION']);
         DB::table('plantillas')->insert([
             'id' => 2, 'estado' => 'ACTIVO', 'archivo_path' => 'plantillas/resolucion.docx',
-            'tokens' => json_encode(['numero_resolucion', 'CARTA_OPP', 'META']),
+            'tokens' => json_encode(['numero_resolucion', 'CARTA_OPP', 'META', 'CARTA_ESPECIALISTA_INVESTIGACION', 'FECHA_CARTA_ESPECIALISTA_INVESTIGACION', 'GENERO']),
         ]);
         DB::table('plantilla_seleccionada')->insert([
             'modulo' => 'ARTICULOS', 'tipo_documento_id' => 2, 'plantilla_id' => 2,
@@ -178,6 +183,9 @@ class GenerarCartaVrinTest extends TestCase
                 $this->assertStringContainsString('013', $xml);
                 $this->assertStringContainsString('017-2026-OPP', $xml);
                 $this->assertStringContainsString('017', $xml);
+                $this->assertStringContainsString('CARTA N° 042-2026', $xml);
+                $this->assertStringContainsString('4 de octubre del 2026', $xml);
+                $this->assertStringContainsString('del docente', $xml);
                 $pdf = dirname($docx).'/resolucion.pdf';
                 File::put($pdf, '%PDF-1.4 resolucion');
 
@@ -186,6 +194,8 @@ class GenerarCartaVrinTest extends TestCase
         });
         $this->postJson('/api/expedientes/1/resolucion/preview', [
             'numero' => 13, 'anio' => 2026, 'fecha_emision' => '2026-10-07',
+            'carta_especialista_investigacion' => 'CARTA N° 042-2026',
+            'fecha_carta_especialista_investigacion' => '2026-10-04',
         ])->assertOk()->assertHeader('Content-Type', 'application/pdf');
         $this->assertDatabaseCount('resoluciones', 0);
         $this->assertDatabaseCount('documentos_generados', 1);
@@ -201,11 +211,16 @@ class GenerarCartaVrinTest extends TestCase
 
         $this->postJson('/api/expedientes/1/resolucion/generar', [
             'numero' => 14, 'anio' => 2026, 'fecha_emision' => '2026-10-08',
+            'carta_especialista_investigacion' => 'CARTA N° 043-2026',
+            'fecha_carta_especialista_investigacion' => '2026-10-05',
         ])->assertCreated()->assertJsonPath('estado', 'RESOLUCION_EMITIDA');
-        $this->assertDatabaseHas('resoluciones', ['expediente_id' => 1, 'numero' => 14]);
+        $this->assertDatabaseHas('resoluciones', ['expediente_id' => 1, 'numero' => 14, 'carta_especialista_investigacion' => 'CARTA N° 043-2026']);
+        $this->assertSame('2026-10-05', Resolucion::findOrFail(1)->fecha_carta_especialista_investigacion->format('Y-m-d'));
         $documento = DocumentoGenerado::where('tipo', 'RESOLUCION')->firstOrFail();
         $this->assertSame('018', $documento->datos['META']);
         $this->assertSame('014', $documento->datos['numero_resolucion']);
+        $this->assertSame('CARTA N° 043-2026', $documento->datos['CARTA_ESPECIALISTA_INVESTIGACION']);
+        $this->assertSame('del', $documento->datos['GENERO']);
         $this->assertFileExists(storage_path('app/'.$documento->docx_path));
     }
 
@@ -453,8 +468,12 @@ class GenerarCartaVrinTest extends TestCase
 
         $respuesta = $this->putJson('/api/expedientes/1/resolucion', [
             'numero' => 13, 'anio' => 2026, 'fecha_emision' => '2026-10-09',
+            'carta_especialista_investigacion' => 'CARTA N° 044-2026',
+            'fecha_carta_especialista_investigacion' => '2026-10-08',
         ]);
         $respuesta->assertOk()->assertJsonPath('documento_generado.version', 2);
+        $this->assertDatabaseHas('resoluciones', ['expediente_id' => 1, 'carta_especialista_investigacion' => 'CARTA N° 044-2026']);
+        $this->assertSame('2026-10-08', Resolucion::findOrFail(1)->fecha_carta_especialista_investigacion->format('Y-m-d'));
         $this->assertDatabaseHas('documentos_generados', ['expediente_id' => 1, 'tipo' => 'RESOLUCION', 'version' => 1, 'es_vigente' => false]);
         $this->assertDatabaseHas('documentos_generados', ['expediente_id' => 1, 'tipo' => 'RESOLUCION', 'version' => 2, 'es_vigente' => true]);
         $this->assertDatabaseHas('resoluciones', ['expediente_id' => 1, 'fecha_emision' => '2026-10-09']);
@@ -467,7 +486,7 @@ class GenerarCartaVrinTest extends TestCase
     private function crearDatos(): void
     {
         DB::table('docentes')->insert([
-            'id' => 1, 'nombres' => 'Docente', 'apellido_paterno' => 'Prueba', 'apellido_materno' => 'Ejemplo',
+            'id' => 1, 'nombres' => 'Docente', 'apellido_paterno' => 'Prueba', 'apellido_materno' => 'Ejemplo', 'genero' => 'MASCULINO',
         ]);
         DB::table('escuelas')->insert(['id' => 1, 'nombre' => 'Escuela de prueba']);
         foreach ([1, 2] as $id) {
@@ -500,7 +519,7 @@ class GenerarCartaVrinTest extends TestCase
     {
         DB::unprepared(<<<'SQL'
             CREATE TABLE docentes (
-                id INTEGER PRIMARY KEY, nombres TEXT, apellido_paterno TEXT, apellido_materno TEXT, deleted_at TEXT
+                id INTEGER PRIMARY KEY, nombres TEXT, apellido_paterno TEXT, apellido_materno TEXT, genero TEXT, deleted_at TEXT
             );
             CREATE TABLE escuelas (id INTEGER PRIMARY KEY, nombre TEXT);
             CREATE TABLE expedientes (
@@ -525,7 +544,7 @@ class GenerarCartaVrinTest extends TestCase
                 fuente_financiamiento TEXT, registro_vrin_numero TEXT, registro_vrin_fecha TEXT,
                 registrado_por INTEGER, created_at TEXT, updated_at TEXT
             );
-            CREATE TABLE resoluciones (expediente_id INTEGER PRIMARY KEY, numero INTEGER, anio INTEGER, fecha_emision TEXT, estado TEXT, emitida_por INTEGER, created_at TEXT, updated_at TEXT);
+            CREATE TABLE resoluciones (expediente_id INTEGER PRIMARY KEY, numero INTEGER, anio INTEGER, fecha_emision TEXT, carta_especialista_investigacion TEXT, fecha_carta_especialista_investigacion TEXT, estado TEXT, emitida_por INTEGER, created_at TEXT, updated_at TEXT);
             CREATE TABLE tipos_documento_plantilla (id INTEGER PRIMARY KEY, codigo TEXT);
             CREATE TABLE plantillas (id INTEGER PRIMARY KEY, estado TEXT, archivo_path TEXT, tokens TEXT);
             CREATE TABLE plantilla_seleccionada (

@@ -17,6 +17,8 @@ class GenerarResolucionRequest extends FormRequest
             'numero' => ['required', 'integer', 'min:1'],
             'anio' => ['required', 'integer', 'between:2020,2100'],
             'fecha_emision' => ['required', 'date'],
+            'carta_especialista_investigacion' => ['required', 'string', 'max:160'],
+            'fecha_carta_especialista_investigacion' => ['required', 'date'],
         ];
     }
 
@@ -30,6 +32,9 @@ class GenerarResolucionRequest extends FormRequest
             'anio.between' => 'El año de la resolución no es válido.',
             'fecha_emision.required' => 'La fecha de emisión es obligatoria.',
             'fecha_emision.date' => 'La fecha de emisión no es válida.',
+            'carta_especialista_investigacion.required' => 'La carta del especialista de investigación es obligatoria.',
+            'fecha_carta_especialista_investigacion.required' => 'La fecha de la carta del especialista de investigación es obligatoria.',
+            'fecha_carta_especialista_investigacion.date' => 'La fecha de la carta del especialista de investigación no es válida.',
         ];
     }
 }

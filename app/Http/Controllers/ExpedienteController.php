@@ -195,6 +195,8 @@ class ExpedienteController extends Controller
                 'numero' => $resolucion->numero,
                 'anio' => $resolucion->anio,
                 'fecha_emision' => $resolucion->fecha_emision?->format('Y-m-d'),
+                'carta_especialista_investigacion' => $resolucion->carta_especialista_investigacion,
+                'fecha_carta_especialista_investigacion' => $resolucion->fecha_carta_especialista_investigacion?->format('Y-m-d'),
                 'estado' => $resolucion->estado,
                 'emitida_por' => $resolucion->emisor?->nombre,
             ] : null,

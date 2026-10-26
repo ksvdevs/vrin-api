@@ -17,6 +17,8 @@ class Resolucion extends Model
         'numero',
         'anio',
         'fecha_emision',
+        'carta_especialista_investigacion',
+        'fecha_carta_especialista_investigacion',
         'estado',
         'emitida_por',
     ];
@@ -25,6 +27,7 @@ class Resolucion extends Model
     {
         return [
             'fecha_emision' => 'date',
+            'fecha_carta_especialista_investigacion' => 'date',
         ];
     }
 

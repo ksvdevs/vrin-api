@@ -46,17 +46,14 @@ class PlantillaProcessor extends TemplateProcessor
     public function normalizarDelimitadores(): void
     {
         $procesar = function (string $xml): string {
-            // 0) Delimitadores escapados en el XML («&lt;&lt;», «&gt;&gt;»).
-            $xml = str_replace(['&lt;&lt;', '&gt;&gt;'], ['<<', '>>'], $xml);
-
-            // 1) Proteger los delimitadores con bytes de control: así las
-            //    etiquetas XML reales que los Word trocea entre runs quedan
-            //    completas y se pueden eliminar sin ambigüedad. OJO: cuando
-            //    el cierre «>>» vive en su propio <w:t>, el tag-close forma
-            //    «>>>» y hay que tomar las DOS últimas «>», no las dos
-            //    primeras (el bracket del tag no es delimitador).
-            $xml = str_replace(['<<', '{{', '}}'], ["\x01", "\x03", "\x04"], $xml);
-            $xml = preg_replace('/>>(?!>)/', "\x02", $xml);
+            // Word puede separar incluso los dos signos de un delimitador
+            // entre distintos runs: «&lt;&lt;GENERO&gt;</w:t>...<w:t>&gt;».
+            // Proteger primero cada entidad evita confundirla con los signos
+            // de las etiquetas XML y permite unir solo los runs intermedios.
+            $xml = str_replace(['&lt;', '&gt;'], ["\x05", "\x06"], $xml);
+            $xml = preg_replace('/\x05(?:<[^>]+>)*\x05/', "\x01", $xml);
+            $xml = preg_replace('/\x06(?:<[^>]+>)*\x06/', "\x02", $xml);
+            $xml = str_replace(['{{', '}}'], ["\x03", "\x04"], $xml);
 
             // 2) Dentro de cada token, eliminar las etiquetas XML internas
             //    (runs partidos) conservando el texto del token.
@@ -68,7 +65,11 @@ class PlantillaProcessor extends TemplateProcessor
 
             // 3) Restaurar delimitadores y normalizar espacios internos
             //    («<< TOKEN>>», «{{ token }}»).
-            $xml = str_replace(["\x01", "\x02", "\x03", "\x04"], ['<<', '>>', '{{', '}}'], $xml);
+            $xml = str_replace(
+                ["\x01", "\x02", "\x03", "\x04", "\x05", "\x06"],
+                ['<<', '>>', '{{', '}}', '&lt;', '&gt;'],
+                $xml
+            );
 
             return preg_replace(
                 ['/(<<)\s+/', '/(\{\{)\s+/', '/\s+(>>)/', '/\s+(\}\})/'],

@@ -25,7 +25,7 @@ class DatosResolucionTest extends TestCase
             'fuente_financiamiento' => 'Recursos ordinarios', 'monto_aprobado' => 1500,
         ]));
         $expediente->setRelation('docente', (new Docente)->forceFill([
-            'nombres' => 'Ana', 'apellido_paterno' => 'Paredes', 'apellido_materno' => 'Quispe',
+            'nombres' => 'Ana', 'apellido_paterno' => 'Paredes', 'apellido_materno' => 'Quispe', 'genero' => 'FEMENINO',
         ]));
         $expediente->setRelation('articulo', (new ExpedienteArticulo)->forceFill([
             'titulo' => 'Artículo científico', 'revista' => 'Revista', 'base_indexadora' => 'Scopus',
@@ -33,14 +33,25 @@ class DatosResolucionTest extends TestCase
         ]));
         $expediente->setRelation('escuela', (new Escuela)->forceFill(['nombre' => 'Ingeniería']));
 
-        $datos = app(DatosResolucionService::class)->construir($expediente, 13, 2026, '2026-10-07');
+        $datos = app(DatosResolucionService::class)->construir($expediente, 13, 2026, '2026-10-07', 'CARTA N° 042-2026', '2026-10-04');
 
         $this->assertSame('013', $datos['numero_resolucion']);
         $this->assertSame('017-2026-OPP', $datos['CARTA_OPP']);
+        $this->assertSame('de la', $datos['GENERO']);
+        $this->assertSame('CARTA N° 042-2026', $datos['CARTA_ESPECIALISTA_INVESTIGACION']);
+        $this->assertSame('4 de octubre del 2026', $datos['FECHA_CARTA_ESPECIALISTA_INVESTIGACION']);
         $this->assertSame('1538-2026-VRIN', $datos['NUMERO_REGISTRO_VRIN']);
         $this->assertSame('017', $datos['META']);
         $this->assertSame('2.3.27.11', $datos['ESPECIFICA']);
         $this->assertSame('1,500.00', $datos['MONTO_APROBADO']);
         $this->assertSame('7 de octubre del 2026', $datos['fecha_emision']);
+
+        $expediente->docente->genero = 'MASCULINO';
+        $datosMasculinos = app(DatosResolucionService::class)->construir($expediente, 13, 2026, '2026-10-07', 'CARTA N° 042-2026', '2026-10-04');
+        $this->assertSame('del', $datosMasculinos['GENERO']);
+
+        $expediente->docente->genero = 'OTRO';
+        $datosNeutros = app(DatosResolucionService::class)->construir($expediente, 13, 2026, '2026-10-07', 'CARTA N° 042-2026', '2026-10-04');
+        $this->assertSame('de la persona', $datosNeutros['GENERO']);
     }
 }

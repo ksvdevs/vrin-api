@@ -8,7 +8,7 @@ use Carbon\Carbon;
 class DatosResolucionService
 {
     /** @return array<string, mixed> */
-    public function construir(Expediente $expediente, int $numero, int $anio, string $fechaEmision): array
+    public function construir(Expediente $expediente, int $numero, int $anio, string $fechaEmision, string $cartaEspecialistaInvestigacion, string $fechaCartaEspecialistaInvestigacion): array
     {
         $expediente->loadMissing(['respuestaOpp', 'docente', 'articulo', 'escuela']);
         $opp = $expediente->respuestaOpp;
@@ -23,11 +23,19 @@ class DatosResolucionService
             'FECHA_REGISTRO_VRIN' => $this->fechaLarga($opp->registro_vrin_fecha),
             'TITULO_ARTICULO' => $articulo->titulo,
             'GRADO' => $expediente->grado ?? $docente->grado,
+            'GENERO' => match ($docente->genero) {
+                'MASCULINO' => 'del',
+                'FEMENINO' => 'de la',
+                'OTRO' => 'de la persona',
+                default => null,
+            },
             'NOMBRES' => $docente->nombres,
             'APELLIDO_PATERNO' => $docente->apellido_paterno,
             'APELLIDO_MATERNO' => $docente->apellido_materno,
             'CARTA_OPP' => $opp->carta_numero,
             'FECHA_CARTA_OPP' => $this->fechaLarga($opp->carta_fecha),
+            'CARTA_ESPECIALISTA_INVESTIGACION' => $cartaEspecialistaInvestigacion,
+            'FECHA_CARTA_ESPECIALISTA_INVESTIGACION' => $this->fechaLarga($fechaCartaEspecialistaInvestigacion),
             'CARTA_DOCENTE' => 'CARTA N° '.$expediente->carta_docente_numero,
             'FECHA_CARTA_DOCENTE' => $this->fechaLarga($expediente->carta_docente_fecha),
             'REVISTA' => $articulo->revista,

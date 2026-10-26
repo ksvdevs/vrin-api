@@ -53,7 +53,7 @@ class DocenteController extends Controller
         $filtros = $request->validate([
             'busqueda' => ['sometimes', 'nullable', 'string', 'max:200'],
             'activo' => ['sometimes', 'nullable', 'boolean'],
-            'tipo_contrato' => ['sometimes', 'nullable', 'string', 'max:30'],
+            'categoria' => ['sometimes', 'nullable', 'string', 'max:30'],
             'grado' => ['sometimes', 'nullable', 'string', 'max:30'],
         ]);
 
@@ -69,7 +69,7 @@ class DocenteController extends Controller
                 }
             })
             ->when(isset($filtros['activo']), fn ($query) => $query->where('activo', $request->boolean('activo')))
-            ->when($filtros['tipo_contrato'] ?? null, fn ($query, $tipo) => $query->where('tipo_contrato', $tipo))
+            ->when($filtros['categoria'] ?? null, fn ($query, $categoria) => $query->where('categoria', $categoria))
             ->when($filtros['grado'] ?? null, fn ($query, $grado) => $query->where('grado', $grado))
             ->orderByDesc('activo')
             ->orderBy('apellido_paterno')
@@ -82,7 +82,9 @@ class DocenteController extends Controller
 
     public function store(DocenteRequest $request)
     {
-        $docente = Docente::create($request->validated());
+        $datos = $request->validated();
+        $datos['tipo_contrato'] = $datos['categoria'] === 'CONTRATADO' ? 'CONTRATADO' : 'NOMBRADO';
+        $docente = Docente::create($datos);
 
         return response()->json($docente->load('escuela.facultad'), 201);
     }
@@ -94,7 +96,11 @@ class DocenteController extends Controller
 
     public function update(DocenteRequest $request, Docente $docente)
     {
-        $docente->update($request->validated());
+        $datos = $request->validated();
+        if (isset($datos['categoria'])) {
+            $datos['tipo_contrato'] = $datos['categoria'] === 'CONTRATADO' ? 'CONTRATADO' : 'NOMBRADO';
+        }
+        $docente->update($datos);
 
         return response()->json($docente->refresh()->load('escuela.facultad'));
     }

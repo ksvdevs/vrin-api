@@ -508,6 +508,8 @@ class ExpedienteWorkflow
                 'numero' => $payload['resolucion_numero'] ?? null,
                 'anio' => $payload['resolucion_anio'] ?? null,
                 'fecha_emision' => $payload['resolucion_fecha_emision'] ?? null,
+                'carta_especialista_investigacion' => $payload['resolucion_carta_especialista_investigacion'] ?? null,
+                'fecha_carta_especialista_investigacion' => $payload['resolucion_fecha_carta_especialista_investigacion'] ?? null,
             ];
         }
 
@@ -533,11 +535,13 @@ class ExpedienteWorkflow
             'numero' => $numero,
             'anio' => $anio,
             'fecha_emision' => $fecha->format('Y-m-d'),
+            'carta_especialista_investigacion' => $payload['carta_especialista_investigacion'],
+            'fecha_carta_especialista_investigacion' => $payload['fecha_carta_especialista_investigacion'],
             'estado' => 'EMITIDA',
             'emitida_por' => $actor->id,
         ]);
 
-        $datos = app(DatosResolucionService::class)->construir($expediente, $numero, $anio, $fecha->format('Y-m-d'));
+        $datos = app(DatosResolucionService::class)->construir($expediente, $numero, $anio, $fecha->format('Y-m-d'), $payload['carta_especialista_investigacion'], $payload['fecha_carta_especialista_investigacion']);
         $this->generator->generar($expediente, 'RESOLUCION', $datos, $actor);
 
         return [];

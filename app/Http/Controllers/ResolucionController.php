@@ -48,7 +48,7 @@ class ResolucionController extends Controller
         abort_unless(in_array($expediente->estado, ['DISPONIBILIDAD_CONFIRMADA', 'RESOLUCION_EMITIDA'], true) && $expediente->respuestaOpp?->disponibilidad === 'SI', 409, 'Guarde primero la respuesta de OPP con disponibilidad confirmada.');
 
         $datos = $request->validated();
-        $mapa = $datosResolucion->construir($expediente, (int) $datos['numero'], (int) $datos['anio'], $datos['fecha_emision']);
+        $mapa = $datosResolucion->construir($expediente, (int) $datos['numero'], (int) $datos['anio'], $datos['fecha_emision'], $datos['carta_especialista_investigacion'], $datos['fecha_carta_especialista_investigacion']);
         $pdf = $generator->vistaPrevia($expediente, $mapa, 'RESOLUCION');
 
         return response($pdf, 200, ['Content-Type' => 'application/pdf', 'Cache-Control' => 'no-store']);
@@ -68,12 +68,14 @@ class ResolucionController extends Controller
             $vigente = $expediente->documentosGenerados()->where('tipo', 'RESOLUCION')->where('es_vigente', true)->lockForUpdate()->first();
             abort_unless($vigente, 409, 'No se encontró la resolución vigente.');
 
-            $mapa = $datosResolucion->construir($expediente, (int) $datos['numero'], (int) $datos['anio'], $datos['fecha_emision']);
+            $mapa = $datosResolucion->construir($expediente, (int) $datos['numero'], (int) $datos['anio'], $datos['fecha_emision'], $datos['carta_especialista_investigacion'], $datos['fecha_carta_especialista_investigacion']);
             $vigente->update(['es_vigente' => false]);
             $nuevo = $generator->generar($expediente, 'RESOLUCION', $mapa, $request->user());
             $expediente->resolucion()->update([
                 'numero' => $datos['numero'], 'anio' => $datos['anio'],
                 'fecha_emision' => $datos['fecha_emision'], 'emitida_por' => $request->user()->id,
+                'carta_especialista_investigacion' => $datos['carta_especialista_investigacion'],
+                'fecha_carta_especialista_investigacion' => $datos['fecha_carta_especialista_investigacion'],
             ]);
 
             return $nuevo;

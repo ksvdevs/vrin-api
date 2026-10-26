@@ -52,6 +52,8 @@ class RespuestaOppRequest extends FormRequest
             'resolucion_numero' => ['nullable', 'integer', 'min:1'],
             'resolucion_anio' => ['nullable', 'integer', 'between:2020,2100'],
             'resolucion_fecha_emision' => ['nullable', 'date'],
+            'resolucion_carta_especialista_investigacion' => ['nullable', 'string', 'max:160'],
+            'resolucion_fecha_carta_especialista_investigacion' => ['nullable', 'date'],
         ];
     }
 
