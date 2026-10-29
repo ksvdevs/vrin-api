@@ -24,7 +24,7 @@ class DashboardResumenTest extends TestCase
             CREATE TABLE rendiciones (expediente_id INTEGER PRIMARY KEY, fecha_desembolso TEXT,
                 monto_desembolsado NUMERIC);
             CREATE TABLE docentes (id INTEGER PRIMARY KEY, activo INTEGER, deleted_at TEXT);
-            CREATE TABLE plantillas (id INTEGER PRIMARY KEY, updated_at TEXT);
+            CREATE TABLE plantillas (id INTEGER PRIMARY KEY, updated_at TEXT, deleted_at TEXT);
             SQL);
 
         DB::table('expedientes')->insert([

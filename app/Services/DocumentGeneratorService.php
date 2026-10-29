@@ -149,6 +149,10 @@ class DocumentGeneratorService
         $procesador2->saveAs($rutaFinal);
         unlink($rutaTemporal);
 
+        if ($tipo === 'RESOLUCION') {
+            app(FormatoResolucionService::class)->aplicar($rutaFinal, $mapa);
+        }
+
         $this->validarDocx($rutaFinal);
 
         return [$plantilla, $mapa];

@@ -105,6 +105,16 @@ class DocenteController extends Controller
         return response()->json($docente->refresh()->load('escuela.facultad'));
     }
 
+    public function cambiarEstado(Request $request, Docente $docente)
+    {
+        $this->authorize('update', $docente);
+
+        $datos = $request->validate(['activo' => ['required', 'boolean']]);
+        $docente->update($datos);
+
+        return response()->json($docente->refresh()->load('escuela.facultad'));
+    }
+
     public function destroy(Docente $docente)
     {
         // Baja lógica: se desactiva el docente y se registra deleted_at (soft delete).

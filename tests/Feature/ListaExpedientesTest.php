@@ -76,6 +76,15 @@ class ListaExpedientesTest extends TestCase
         $this->getJson('/api/expedientes?periodo=2025&estado=EN_ESPERA_OPP')->assertOk()->assertJsonPath('meta.total', 0);
     }
 
+    public function test_conserva_la_busqueda_y_el_nombre_del_docente_dado_de_baja(): void
+    {
+        DB::table('docentes')->where('id', 1)->update(['deleted_at' => '2026-10-10 12:00:00']);
+
+        $this->getJson('/api/expedientes?busqueda=41982310')
+            ->assertOk()->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('data.0.docente.nombre_completo', 'Luis Ricardo Paredes Quiroz');
+    }
+
     public function test_valida_filtros_y_conserva_autorizacion(): void
     {
         $this->getJson('/api/expedientes?periodo=abc')->assertUnprocessable()->assertJsonValidationErrors('periodo');

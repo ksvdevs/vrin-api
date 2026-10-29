@@ -70,6 +70,10 @@ class ReevaluarValidacionTest extends TestCase
         $auditoria = DB::table('auditoria')->where('accion', 'expediente.validacion_calidad')->first();
         $this->assertSame('NO_CUMPLE', json_decode($auditoria->antes, true)['resultado']);
         $this->assertSame('Se evaluó incorrectamente la carta de aceptación.', json_decode($auditoria->despues, true)['motivo_correccion']);
+        $this->assertSame(
+            'Se evaluó incorrectamente la carta de aceptación.',
+            Expediente::findOrFail(1)->ultimoMotivoReevaluacion(),
+        );
     }
 
     public function test_calidad_corrige_cumple_a_no_cumple_y_registra_la_nueva_observacion(): void
@@ -87,6 +91,25 @@ class ReevaluarValidacionTest extends TestCase
 
         $this->assertDatabaseHas('validaciones_calidad', ['expediente_id' => 2, 'resultado' => 'NO_CUMPLE']);
         $this->assertSame(1, DB::table('observaciones')->where('expediente_id', 2)->whereNull('resuelta_at')->count());
+    }
+
+    public function test_el_ultimo_motivo_se_actualiza_en_cada_reevaluacion(): void
+    {
+        $primera = $this->datosValidacion('Se corrigió la revisión de la carta de aceptación.');
+        $this->postJson('/api/expedientes/1/validacion', $primera)
+            ->assertOk()->assertJsonPath('estado', 'VALIDADO_CALIDAD');
+
+        $segunda = $this->datosValidacion('Se corrigió nuevamente la revisión de afiliación.');
+        $segunda['resultado'] = 'NO_CUMPLE';
+        $segunda['checklist']['afiliacion_universidad'] = false;
+        $segunda['observacion'] = 'Falta acreditar la afiliación.';
+        $this->postJson('/api/expedientes/1/validacion', $segunda)
+            ->assertOk()->assertJsonPath('estado', 'NO_CUMPLE');
+
+        $this->assertSame(
+            'Se corrigió nuevamente la revisión de afiliación.',
+            Expediente::findOrFail(1)->ultimoMotivoReevaluacion(),
+        );
     }
 
     public function test_exige_calidad_motivo_y_ausencia_de_carta(): void
@@ -118,6 +141,47 @@ class ReevaluarValidacionTest extends TestCase
     {
         $this->postJson('/api/expedientes/4/validacion', $this->datosValidacion())
             ->assertOk()->assertJsonPath('estado', 'VALIDADO_CALIDAD');
+    }
+
+    public function test_exige_observacion_si_algun_requisito_no_cumple(): void
+    {
+        $datos = $this->datosValidacion();
+        $datos['resultado'] = 'NO_CUMPLE';
+        $datos['checklist']['afiliacion_universidad'] = false;
+
+        $this->postJson('/api/expedientes/4/validacion', $datos)
+            ->assertUnprocessable()->assertJsonValidationErrors('observacion');
+
+        $datos['observacion'] = '   ';
+        $this->postJson('/api/expedientes/4/validacion', $datos)
+            ->assertUnprocessable()->assertJsonValidationErrors('observacion');
+
+        $datos['observacion'] = 'El artículo no declara afiliación a la universidad.';
+        $this->postJson('/api/expedientes/4/validacion', $datos)
+            ->assertOk()->assertJsonPath('estado', 'NO_CUMPLE');
+    }
+
+    public function test_observacion_marca_no_cumple_aunque_todo_el_checklist_cumpla(): void
+    {
+        $datos = $this->datosValidacion();
+        $datos['observacion'] = 'Falta firma del docente.';
+
+        $this->postJson('/api/expedientes/4/validacion', $datos)
+            ->assertUnprocessable()->assertJsonValidationErrors('resultado');
+
+        $datos['resultado'] = 'NO_CUMPLE';
+        $this->postJson('/api/expedientes/4/validacion', $datos)
+            ->assertOk()->assertJsonPath('estado', 'NO_CUMPLE');
+
+        $this->assertDatabaseHas('validaciones_calidad', [
+            'expediente_id' => 4,
+            'resultado' => 'NO_CUMPLE',
+            'observacion' => 'Falta firma del docente.',
+        ]);
+        $this->assertDatabaseHas('observaciones', [
+            'expediente_id' => 4,
+            'texto' => 'Falta firma del docente.',
+        ]);
     }
 
     public function test_rechaza_un_resultado_que_contradice_el_checklist(): void

@@ -9,6 +9,9 @@ class ValidacionCalidadRequest extends FormRequest
 {
     protected function prepareForValidation(): void
     {
+        if (is_string($this->input('observacion'))) {
+            $this->merge(['observacion' => trim($this->input('observacion'))]);
+        }
         if (is_string($this->input('motivo_correccion'))) {
             $this->merge(['motivo_correccion' => trim($this->input('motivo_correccion'))]);
         }
@@ -30,7 +33,7 @@ class ValidacionCalidadRequest extends FormRequest
             'checklist.carta_aceptacion' => ['required', 'boolean'],
             'checklist.docente_ordinario_contratado' => ['required', 'boolean'],
             'checklist.afiliacion_universidad' => ['required', 'boolean'],
-            'observacion' => ['nullable', 'string'],
+            'observacion' => ['required_if:resultado,NO_CUMPLE', 'nullable', 'string'],
             'motivo_correccion' => [$esCorreccion ? 'required' : 'nullable', 'string', 'min:10', 'max:500'],
         ];
     }
@@ -46,8 +49,9 @@ class ValidacionCalidadRequest extends FormRequest
             $todosCumplen = (bool) $checklist['carta_aceptacion']
                 && (bool) $checklist['docente_ordinario_contratado']
                 && (bool) $checklist['afiliacion_universidad'];
-            if (($this->input('resultado') === 'CUMPLE') !== $todosCumplen) {
-                $validator->errors()->add('resultado', 'El resultado debe coincidir con los requisitos verificados.');
+            $hayObservacion = is_string($this->input('observacion')) && trim($this->input('observacion')) !== '';
+            if (($this->input('resultado') === 'CUMPLE') !== ($todosCumplen && ! $hayObservacion)) {
+                $validator->errors()->add('resultado', 'El resultado debe coincidir con los requisitos verificados y la observación.');
             }
         });
     }
@@ -67,6 +71,7 @@ class ValidacionCalidadRequest extends FormRequest
             'checklist.docente_ordinario_contratado.boolean' => 'El valor de Docente Ordinario/Contratado no es válido.',
             'checklist.afiliacion_universidad.required' => 'Debe indicar la Afiliación a la Universidad.',
             'checklist.afiliacion_universidad.boolean' => 'El valor de Afiliación a la Universidad no es válido.',
+            'observacion.required_if' => 'Describe el motivo cuando algún requisito no cumple.',
         ];
     }
 }

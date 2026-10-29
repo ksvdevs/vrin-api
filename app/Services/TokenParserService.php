@@ -36,6 +36,14 @@ class TokenParserService
             throw new \RuntimeException("No se pudo abrir el DOCX: {$rutaDocx}");
         }
 
+        if ($zip->locateName('[Content_Types].xml') === false
+            || $zip->locateName('_rels/.rels') === false
+            || $zip->locateName('word/document.xml') === false) {
+            $zip->close();
+
+            throw new \RuntimeException('El DOCX no contiene los componentes obligatorios.');
+        }
+
         $partes = self::PARTES;
 
         for ($i = 0; $i < $zip->numFiles; $i++) {
@@ -51,9 +59,27 @@ class TokenParserService
         foreach ($partes as $parte) {
             $xml = $zip->getFromName($parte);
 
-            if ($xml !== false) {
-                $texto .= ' '.html_entity_decode(strip_tags($xml), ENT_QUOTES | ENT_XML1, 'UTF-8');
+            if ($xml === false) {
+                $zip->close();
+
+                throw new \RuntimeException("No se pudo leer {$parte} del DOCX.");
             }
+
+            $documento = new \DOMDocument;
+            $anterior = libxml_use_internal_errors(true);
+            try {
+                $xmlValido = $documento->loadXML($xml, LIBXML_NONET);
+            } finally {
+                libxml_clear_errors();
+                libxml_use_internal_errors($anterior);
+            }
+            if (! $xmlValido) {
+                $zip->close();
+
+                throw new \RuntimeException("{$parte} contiene XML inválido.");
+            }
+
+            $texto .= ' '.html_entity_decode(strip_tags($xml), ENT_QUOTES | ENT_XML1, 'UTF-8');
         }
 
         $zip->close();

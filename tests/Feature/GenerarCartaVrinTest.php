@@ -546,7 +546,7 @@ class GenerarCartaVrinTest extends TestCase
             );
             CREATE TABLE resoluciones (expediente_id INTEGER PRIMARY KEY, numero INTEGER, anio INTEGER, fecha_emision TEXT, carta_especialista_investigacion TEXT, fecha_carta_especialista_investigacion TEXT, estado TEXT, emitida_por INTEGER, created_at TEXT, updated_at TEXT);
             CREATE TABLE tipos_documento_plantilla (id INTEGER PRIMARY KEY, codigo TEXT);
-            CREATE TABLE plantillas (id INTEGER PRIMARY KEY, estado TEXT, archivo_path TEXT, tokens TEXT);
+            CREATE TABLE plantillas (id INTEGER PRIMARY KEY, estado TEXT, archivo_path TEXT, tokens TEXT, deleted_at TEXT);
             CREATE TABLE plantilla_seleccionada (
                 modulo TEXT, tipo_documento_id INTEGER, plantilla_id INTEGER,
                 PRIMARY KEY (modulo, tipo_documento_id)

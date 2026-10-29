@@ -45,7 +45,7 @@ class Expediente extends Model
 
     public function docente()
     {
-        return $this->belongsTo(Docente::class, 'docente_id');
+        return $this->belongsTo(Docente::class, 'docente_id')->withTrashed();
     }
 
     public function escuela()
@@ -113,5 +113,16 @@ class Expediente extends Model
     public function auditoria()
     {
         return $this->hasMany(Auditoria::class, 'expediente_id');
+    }
+
+    public function ultimoMotivoReevaluacion(): ?string
+    {
+        $ultimaValidacion = $this->auditoria()
+            ->where('accion', 'expediente.validacion_calidad')
+            ->orderByDesc('id')
+            ->first();
+        $motivo = data_get($ultimaValidacion?->despues, 'motivo_correccion');
+
+        return is_string($motivo) && trim($motivo) !== '' ? $motivo : null;
     }
 }

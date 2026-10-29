@@ -22,8 +22,7 @@ class SubirPlantillaRequest extends FormRequest
             'archivo' => [
                 'required',
                 'file',
-                'mimes:docx',
-                'mimetypes:application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'extensions:docx',
                 'max:25600', // 25 MB (RF-42)
             ],
         ];
@@ -36,8 +35,7 @@ class SubirPlantillaRequest extends FormRequest
             'tipo_documento_id.required' => 'El tipo de documento es obligatorio.',
             'tipo_documento_id.exists' => 'El tipo de documento seleccionado no existe.',
             'archivo.required' => 'Debe adjuntar el archivo DOCX de la plantilla.',
-            'archivo.mimes' => 'La plantilla debe ser un archivo .docx.',
-            'archivo.mimetypes' => 'La plantilla debe ser un documento Word (.docx) válido.',
+            'archivo.extensions' => 'La plantilla debe tener extensión .docx.',
             'archivo.max' => 'La plantilla no puede superar los 25 MB.',
         ];
     }

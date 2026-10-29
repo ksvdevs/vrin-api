@@ -3,13 +3,17 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Plantilla extends Model
 {
+    use SoftDeletes;
+
     protected $table = 'plantillas';
 
     protected $fillable = [
         'codigo',
+        'familia_id',
         'nombre',
         'modulo',
         'tipo_documento_id',

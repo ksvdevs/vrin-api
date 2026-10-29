@@ -166,6 +166,7 @@ class ExpedienteController extends Controller
                 'resultado' => $validacion->resultado,
                 'checklist' => $validacion->checklist,
                 'observacion' => $validacion->observacion,
+                'ultimo_motivo_reevaluacion' => $expediente->ultimoMotivoReevaluacion(),
                 'validado_at' => $validacion->validado_at?->format('Y-m-d H:i:s'),
                 'validado_por' => $validacion->validador?->nombre,
             ] : null,
@@ -281,6 +282,7 @@ class ExpedienteController extends Controller
         $respuesta = new BinaryFileResponse($ruta);
         $respuesta->headers->set('Content-Type', $mime);
         $respuesta->headers->set('Content-Disposition', $this->disposicionArchivo($respuesta, $nombre, $descargar));
+        $respuesta->headers->set('Cache-Control', 'no-store');
 
         return $respuesta;
     }

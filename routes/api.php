@@ -39,6 +39,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/escuelas', [EscuelaController::class, 'store']);
 
     // Fase 1: búsqueda (?q=) y CRUD de docentes (destroy = baja lógica).
+    Route::patch('/docentes/{docente}/estado', [DocenteController::class, 'cambiarEstado']);
     Route::apiResource('docentes', DocenteController::class);
 
     // Fase 2 — Etapa 1: registro de expediente (sin OCR) y carta del docente.
@@ -63,8 +64,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/expedientes/{expediente}/documentos-completos', [ExpedienteController::class, 'marcarDocumentosCompletos']);
 
     // Fase 5 — Gestor de plantillas, selección vigente (RN-13) y generación documental.
+    Route::get('/plantillas/tipos', [PlantillaController::class, 'tipos']);
     Route::get('/plantillas', [PlantillaController::class, 'index']);
     Route::post('/plantillas', [PlantillaController::class, 'store']);
+    Route::get('/plantillas/{plantilla}/versiones', [PlantillaController::class, 'versiones']);
     Route::patch('/plantillas/{plantilla}', [PlantillaController::class, 'update']);
     Route::delete('/plantillas/{plantilla}', [PlantillaController::class, 'destroy']);
     Route::get('/plantilla-seleccion', [PlantillaSeleccionController::class, 'index']);

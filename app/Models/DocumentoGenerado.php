@@ -66,7 +66,7 @@ class DocumentoGenerado extends Model
 
     public function plantilla()
     {
-        return $this->belongsTo(Plantilla::class, 'plantilla_id');
+        return $this->belongsTo(Plantilla::class, 'plantilla_id')->withTrashed();
     }
 
     public function generador()
