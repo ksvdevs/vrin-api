@@ -18,6 +18,7 @@ final class TokensConocidos
         'ASUNTO_CARTA',
         'FECHA_ACEPTACION',
         'GRADO',
+        'GENERO',
         'NOMBRES',
         'APELLIDO_PATERNO',
         'APELLIDO_MATERNO',

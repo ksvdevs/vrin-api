@@ -89,6 +89,7 @@ class GenerarCartaVrinTest extends TestCase
         $this->assertLessThanOrEqual(12, strlen($documento->codigo_verificacion));
         $this->assertSame('CARTA_VRIN', $documento->tipo);
         $this->assertSame('1392-2026', $documento->datos['REGISTRO_MESA_PARTES']);
+        $this->assertSame('del', $documento->datos['GENERO']);
         $this->assertSame('Solicito financiamiento para publicación de artículo', $documento->datos['ASUNTO_CARTA']);
         $this->assertSame('2 de octubre del 2026', $documento->datos['FECHA_ACEPTACION']);
         $ruta = storage_path('app/'.$documento->docx_path);
@@ -100,6 +101,7 @@ class GenerarCartaVrinTest extends TestCase
         $zip->close();
         $this->assertStringContainsString('067-2026', $xml);
         $this->assertStringContainsString('1392-2026', $xml);
+        $this->assertStringContainsString('del docente', $xml);
         $this->assertStringContainsString('Solicito financiamiento para publicación de artículo', $xml);
         $this->assertStringContainsString('2 de octubre del 2026', $xml);
         Queue::assertPushed(ConvertDocxToPdfJob::class,
@@ -128,6 +130,19 @@ class GenerarCartaVrinTest extends TestCase
         $this->assertSame('3 de octubre del 2026', $documento->datos['FECHA_ACEPTACION']);
     }
 
+    public function test_la_carta_usa_de_la_para_una_docente_y_lo_muestra_en_la_vista_previa(): void
+    {
+        DB::table('docentes')->where('id', 1)->update(['genero' => 'FEMENINO']);
+
+        $preview = $this->postJson('/api/expedientes/1/carta-vrin/preview', $this->datosCarta())->assertOk();
+        $this->assertStringContainsString('de la docente', $this->textoDocumentoWord($preview->getContent()));
+
+        $respuesta = $this->postJson('/api/expedientes/1/carta-vrin', $this->datosCarta())->assertCreated();
+        $documento = DocumentoGenerado::findOrFail($respuesta->json('documento_generado.id'));
+        $this->assertSame('de la', $documento->datos['GENERO']);
+        $this->assertStringContainsString('de la docente', $this->textoDocumentoWord(File::get(storage_path('app/'.$documento->docx_path))));
+    }
+
     public function test_analiza_la_carta_opp_y_guarda_el_borrador_antes_de_generar_resolucion(): void
     {
         $this->postJson('/api/expedientes/1/carta-vrin', $this->datosCarta())->assertCreated();
@@ -147,6 +162,18 @@ class GenerarCartaVrinTest extends TestCase
             ->assertJsonPath('datos.carta_numero', '017-2026-OPP');
 
         $this->assertDatabaseCount('respuestas_opp', 0);
+        DB::table('expediente_articulos')->where('expediente_id', 1)->update(['monto_solicitado' => 2000]);
+        $this->postJson('/api/expedientes/1/respuesta-opp', [
+            'disponibilidad' => 'SI', 'monto_aprobado' => 1500, 'meta_presupuestal' => '017',
+            'especifica_gasto' => '2.3.27.11', 'fuente_financiamiento' => 'Recursos ordinarios',
+            'carta_numero' => '017-2026-OPP', 'carta_fecha' => '2026-10-05',
+            'registro_vrin_numero' => '1538-2026-VRIN', 'registro_vrin_fecha' => '2026-10-06',
+        ])->assertUnprocessable()->assertJsonValidationErrors([
+            'resolucion_numero', 'resolucion_anio', 'resolucion_fecha_emision',
+            'resolucion_carta_especialista_investigacion',
+            'resolucion_fecha_carta_especialista_investigacion',
+        ]);
+        $this->assertDatabaseCount('respuestas_opp', 0);
         $this->postJson('/api/expedientes/1/respuesta-opp', [
             'disponibilidad' => 'SI', 'monto_aprobado' => 1500, 'meta_presupuestal' => '017',
             'especifica_gasto' => '2.3.27.11', 'fuente_financiamiento' => 'Recursos ordinarios',
@@ -157,6 +184,7 @@ class GenerarCartaVrinTest extends TestCase
             'resolucion_fecha_carta_especialista_investigacion' => '2026-10-04',
         ])->assertCreated()->assertJsonPath('estado', 'DISPONIBILIDAD_CONFIRMADA');
         $this->assertDatabaseHas('respuestas_opp', ['expediente_id' => 1, 'meta_presupuestal' => '017']);
+        $this->assertDatabaseHas('expediente_articulos', ['expediente_id' => 1, 'monto_solicitado' => 1500]);
         $borrador = json_decode(DB::table('expedientes')->where('id', 1)->value('resolucion_borrador'), true);
         $this->assertSame(13, $borrador['numero']);
         $this->assertSame('CARTA N° 042-2026', $borrador['carta_especialista_investigacion']);
@@ -201,13 +229,16 @@ class GenerarCartaVrinTest extends TestCase
         $this->assertDatabaseCount('documentos_generados', 1);
 
         $this->putJson('/api/expedientes/1/respuesta-opp', [
-            'disponibilidad' => 'SI', 'monto_aprobado' => 1500, 'meta_presupuestal' => '018',
+            'disponibilidad' => 'SI', 'monto_aprobado' => 1400, 'meta_presupuestal' => '018',
             'especifica_gasto' => '2.3.27.11', 'fuente_financiamiento' => 'Recursos ordinarios',
             'carta_numero' => '017-2026-OPP', 'carta_fecha' => '2026-10-05',
             'registro_vrin_numero' => '1538-2026-VRIN', 'registro_vrin_fecha' => '2026-10-06',
             'resolucion_numero' => 14, 'resolucion_anio' => 2026, 'resolucion_fecha_emision' => '2026-10-08',
+            'resolucion_carta_especialista_investigacion' => 'CARTA N° 042-2026',
+            'resolucion_fecha_carta_especialista_investigacion' => '2026-10-04',
         ])->assertOk()->assertJsonPath('resolucion_borrador.numero', 14);
         $this->assertDatabaseHas('respuestas_opp', ['expediente_id' => 1, 'meta_presupuestal' => '018']);
+        $this->assertDatabaseHas('expediente_articulos', ['expediente_id' => 1, 'monto_solicitado' => 1400]);
 
         $this->postJson('/api/expedientes/1/resolucion/generar', [
             'numero' => 14, 'anio' => 2026, 'fecha_emision' => '2026-10-08',
@@ -464,6 +495,8 @@ class GenerarCartaVrinTest extends TestCase
             'fuente_financiamiento' => 'Recursos ordinarios', 'registro_vrin_numero' => '1538-VRIN',
             'registro_vrin_fecha' => '2026-10-08', 'resolucion_numero' => 13,
             'resolucion_anio' => 2026, 'resolucion_fecha_emision' => '2026-10-09',
+            'resolucion_carta_especialista_investigacion' => 'CARTA N° 044-2026',
+            'resolucion_fecha_carta_especialista_investigacion' => '2026-10-08',
         ])->assertOk();
 
         $respuesta = $this->putJson('/api/expedientes/1/resolucion', [
@@ -481,6 +514,23 @@ class GenerarCartaVrinTest extends TestCase
         $documentoId = $respuesta->json('documento_generado.id');
         $this->get("/api/expedientes/1/documentos/{$documentoId}?formato=docx")
             ->assertOk()->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    }
+
+    private function textoDocumentoWord(string $contenido): string
+    {
+        $ruta = tempnam(sys_get_temp_dir(), 'carta-genero-');
+        try {
+            File::put($ruta, $contenido);
+            $zip = new ZipArchive;
+            $this->assertTrue($zip->open($ruta));
+            $xml = $zip->getFromName('word/document.xml');
+            $zip->close();
+            $this->assertIsString($xml);
+
+            return $xml;
+        } finally {
+            File::delete($ruta);
+        }
     }
 
     private function crearDatos(): void
@@ -502,12 +552,12 @@ class GenerarCartaVrinTest extends TestCase
         }
 
         $word = new PhpWord;
-        $word->addSection()->addText('Carta <<NUMERO_CARTA_VRIN>> / Registro <<REGISTRO_MESA_PARTES>> / <<ASUNTO_CARTA>> / <<FECHA_ACEPTACION>>');
+        $word->addSection()->addText('Carta <<NUMERO_CARTA_VRIN>> / Registro <<REGISTRO_MESA_PARTES>> / <<ASUNTO_CARTA>> / <<FECHA_ACEPTACION>> / <<GENERO>> docente');
         IOFactory::createWriter($word, 'Word2007')->save(storage_path('app/plantillas/carta.docx'));
         DB::table('tipos_documento_plantilla')->insert(['id' => 1, 'codigo' => 'CARTA']);
         DB::table('plantillas')->insert([
             'id' => 1, 'estado' => 'ACTIVO', 'archivo_path' => 'plantillas/carta.docx',
-            'tokens' => json_encode(['NUMERO_CARTA_VRIN', 'REGISTRO_MESA_PARTES', 'ASUNTO_CARTA', 'FECHA_ACEPTACION']),
+            'tokens' => json_encode(['NUMERO_CARTA_VRIN', 'REGISTRO_MESA_PARTES', 'ASUNTO_CARTA', 'FECHA_ACEPTACION', 'GENERO']),
         ]);
         DB::table('plantilla_seleccionada')->insert([
             'modulo' => 'ARTICULOS', 'tipo_documento_id' => 1, 'plantilla_id' => 1,

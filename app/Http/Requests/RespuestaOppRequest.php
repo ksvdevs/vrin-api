@@ -49,11 +49,11 @@ class RespuestaOppRequest extends FormRequest
             ],
             'registro_vrin_numero' => ['required', 'string', 'max:30'],
             'registro_vrin_fecha' => ['required', 'date'],
-            'resolucion_numero' => ['nullable', 'integer', 'min:1'],
-            'resolucion_anio' => ['nullable', 'integer', 'between:2020,2100'],
-            'resolucion_fecha_emision' => ['nullable', 'date'],
-            'resolucion_carta_especialista_investigacion' => ['nullable', 'string', 'max:160'],
-            'resolucion_fecha_carta_especialista_investigacion' => ['nullable', 'date'],
+            'resolucion_numero' => ['required_if:disponibilidad,SI', 'integer', 'min:1'],
+            'resolucion_anio' => ['required_if:disponibilidad,SI', 'integer', 'between:2020,2100'],
+            'resolucion_fecha_emision' => ['required_if:disponibilidad,SI', 'date'],
+            'resolucion_carta_especialista_investigacion' => ['required_if:disponibilidad,SI', 'string', 'max:160', 'regex:/\S/'],
+            'resolucion_fecha_carta_especialista_investigacion' => ['required_if:disponibilidad,SI', 'date'],
         ];
     }
 
@@ -76,6 +76,12 @@ class RespuestaOppRequest extends FormRequest
             'fuente_financiamiento.prohibited_if' => 'Si no hay disponibilidad, la fuente de financiamiento debe ir vacía.',
             'registro_vrin_numero.required' => 'El número de registro VRIN es obligatorio.',
             'registro_vrin_fecha.required' => 'La fecha de registro VRIN es obligatoria.',
+            'resolucion_numero.required_if' => 'El número de resolución es obligatorio.',
+            'resolucion_anio.required_if' => 'El año de resolución es obligatorio.',
+            'resolucion_fecha_emision.required_if' => 'La fecha de emisión VRIN es obligatoria.',
+            'resolucion_carta_especialista_investigacion.required_if' => 'La carta del especialista es obligatoria.',
+            'resolucion_carta_especialista_investigacion.regex' => 'La carta del especialista no puede estar vacía.',
+            'resolucion_fecha_carta_especialista_investigacion.required_if' => 'La fecha de la carta del especialista es obligatoria.',
         ];
     }
 }

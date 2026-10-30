@@ -504,6 +504,9 @@ class ExpedienteWorkflow
         if (! $disponible) {
             $expediente->cerrado_at = now();
         } else {
+            $expediente->articulo()->firstOrFail()->update([
+                'monto_solicitado' => $payload['monto_aprobado'],
+            ]);
             $expediente->resolucion_borrador = [
                 'numero' => $payload['resolucion_numero'] ?? null,
                 'anio' => $payload['resolucion_anio'] ?? null,

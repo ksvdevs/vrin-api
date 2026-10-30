@@ -192,14 +192,18 @@ class PlantillaCrudTest extends TestCase
     {
         $rutaTemporal = tempnam(sys_get_temp_dir(), 'plantilla-');
         $documento = new PhpWord;
-        $documento->addSection()->addText('Estimado <<NOMBRES>>');
+        $documento->addSection()->addText('Estimado <<NOMBRES>> <<GENERO>>');
         IOFactory::createWriter($documento, 'Word2007')->save($rutaTemporal);
         $zip = new \ZipArchive;
         $zip->open($rutaTemporal);
         $xml = $zip->getFromName('word/document.xml');
-        $zip->addFromString('word/document.xml', str_replace('<<NOMBRES>>', '&lt;&lt;NOMBRES&gt;&gt;', (string) $xml));
+        $zip->addFromString('word/document.xml', str_replace(
+            ['<<NOMBRES>>', '<<GENERO>>'],
+            ['&lt;&lt;NOMBRES&gt;&gt;', '&lt;&lt;GENERO&gt;&gt;'],
+            (string) $xml
+        ));
         $zip->close();
-        $this->assertSame(['NOMBRES'], app(TokenParserService::class)->extraer($rutaTemporal));
+        $this->assertSame(['GENERO', 'NOMBRES'], app(TokenParserService::class)->extraer($rutaTemporal));
 
         $respuesta = $this->postJson('/api/plantillas', [
             'nombre' => 'Carta real',
@@ -212,8 +216,8 @@ class PlantillaCrudTest extends TestCase
             $this->archivosCreados[] = storage_path('app/'.$rutaCreada);
         }
 
-        $respuesta->assertCreated()->assertJsonPath('tokens_count', 1)
-            ->assertJsonPath('tokens.0', 'NOMBRES')->assertJsonPath('sin_mapeo', []);
+        $respuesta->assertCreated()->assertJsonPath('tokens_count', 2)
+            ->assertJsonPath('tokens.0', 'GENERO')->assertJsonPath('tokens.1', 'NOMBRES')->assertJsonPath('sin_mapeo', []);
     }
 
     public function test_rechaza_docx_con_xml_malformado_sin_dejar_archivos(): void

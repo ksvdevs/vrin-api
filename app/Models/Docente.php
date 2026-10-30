@@ -46,4 +46,14 @@ class Docente extends Model
     {
         return $this->hasMany(Expediente::class, 'docente_id');
     }
+
+    public function tratamientoGenero(): ?string
+    {
+        return match ($this->genero) {
+            'MASCULINO' => 'del',
+            'FEMENINO' => 'de la',
+            'OTRO' => 'de la persona',
+            default => null,
+        };
+    }
 }

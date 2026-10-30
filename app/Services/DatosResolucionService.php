@@ -23,12 +23,7 @@ class DatosResolucionService
             'FECHA_REGISTRO_VRIN' => $this->fechaLarga($opp->registro_vrin_fecha),
             'TITULO_ARTICULO' => $articulo->titulo,
             'GRADO' => $expediente->grado ?? $docente->grado,
-            'GENERO' => match ($docente->genero) {
-                'MASCULINO' => 'del',
-                'FEMENINO' => 'de la',
-                'OTRO' => 'de la persona',
-                default => null,
-            },
+            'GENERO' => $docente->tratamientoGenero(),
             'NOMBRES' => $docente->nombres,
             'APELLIDO_PATERNO' => $docente->apellido_paterno,
             'APELLIDO_MATERNO' => $docente->apellido_materno,

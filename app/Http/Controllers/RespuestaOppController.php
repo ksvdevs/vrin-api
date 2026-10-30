@@ -52,6 +52,9 @@ class RespuestaOppController extends Controller
                 'registro_vrin_fecha' => $datos['registro_vrin_fecha'],
                 'registrado_por' => $request->user()->id,
             ]);
+            $expediente->articulo()->firstOrFail()->update([
+                'monto_solicitado' => $datos['monto_aprobado'],
+            ]);
             $expediente->update(['resolucion_borrador' => [
                 'numero' => $datos['resolucion_numero'] ?? null,
                 'anio' => $datos['resolucion_anio'] ?? null,

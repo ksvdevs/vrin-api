@@ -176,6 +176,7 @@ class DocumentGeneratorService
         $mapa = [
             'CIUDAD' => config('vrin.ciudad'),
             'GRADO' => $expediente->grado,
+            'GENERO' => $expediente->docente?->tratamientoGenero(),
             'NOMBRES' => $expediente->docente?->nombres,
             'APELLIDO_PATERNO' => $expediente->docente?->apellido_paterno,
             'APELLIDO_MATERNO' => $expediente->docente?->apellido_materno ?? '',
