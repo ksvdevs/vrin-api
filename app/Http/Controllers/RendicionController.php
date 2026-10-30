@@ -100,7 +100,7 @@ class RendicionController extends Controller
 
         $payload = $request->validate([
             'fecha_informe' => ['required', 'date', 'after_or_equal:'.$rendicion->fecha_desembolso->format('Y-m-d')],
-            'doi' => ['nullable', 'string', 'max:255'],
+            'doi' => ['required', 'string', 'max:255'],
         ]);
 
         // RN-03: Exige comprobantes.

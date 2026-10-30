@@ -170,6 +170,16 @@ class RendicionPaso4Test extends TestCase
         ]);
 
         $this->postJson('/api/expedientes/1/rendicion/cerrar', [
+            'fecha_informe' => '2027-01-07',
+        ])->assertUnprocessable()->assertJsonValidationErrors('doi');
+
+        $this->postJson('/api/expedientes/1/rendicion/cerrar', [
+            'fecha_informe' => '2027-01-07',
+            'doi' => '   ',
+        ])->assertUnprocessable()->assertJsonValidationErrors('doi');
+        $this->assertDatabaseHas('rendiciones', ['expediente_id' => 1, 'estado' => 'BORRADOR']);
+
+        $this->postJson('/api/expedientes/1/rendicion/cerrar', [
             'fecha_informe' => '2026-10-06',
         ])->assertUnprocessable()->assertJsonValidationErrors('fecha_informe');
 
