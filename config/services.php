@@ -53,4 +53,8 @@ return [
         'model' => env('GEMINI_MODEL', 'gemini-3.5-flash-lite'),
     ],
 
+    'apisperu' => [
+        'token' => env('APISPERU_TOKEN'),
+    ],
+
 ];

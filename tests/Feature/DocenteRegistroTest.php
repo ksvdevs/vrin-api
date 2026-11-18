@@ -6,6 +6,7 @@ use App\Models\Expediente;
 use App\Models\Rol;
 use App\Models\Usuario;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class DocenteRegistroTest extends TestCase
@@ -78,7 +79,84 @@ class DocenteRegistroTest extends TestCase
         $this->assertDatabaseCount('docentes', 0);
     }
 
-    public function test_crud_y_baja_logica_conservan_el_docente_del_expediente(): void
+    public function test_consulta_dni_y_completa_los_datos_si_no_esta_registrado(): void
+    {
+        config(['services.apisperu.token' => 'token-prueba']);
+        Http::fake(['dniruc.apisperu.com/*' => Http::response([
+            'success' => true,
+            'nombres' => 'Maria Elena',
+            'apellidoPaterno' => 'Quispe',
+            'apellidoMaterno' => 'Rojas',
+        ])]);
+
+        $this->getJson('/api/docentes/consultar-dni?dni=77100148')
+            ->assertOk()
+            ->assertJsonPath('registrado', false)
+            ->assertJsonPath('datos.nombres', 'Maria Elena')
+            ->assertJsonPath('datos.apellido_paterno', 'Quispe')
+            ->assertJsonPath('datos.apellido_materno', 'Rojas');
+
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/api/v1/dni/77100148')
+            && str_contains($request->url(), 'token=token-prueba'));
+    }
+
+    public function test_dni_registrado_no_consulta_el_servicio_externo(): void
+    {
+        DB::table('docentes')->insert([
+            'id' => 1, 'dni' => '77100148', 'nombres' => 'Maria', 'apellido_paterno' => 'Quispe',
+            'escuela_id' => 1, 'activo' => 1,
+        ]);
+        Http::fake();
+
+        $this->getJson('/api/docentes/consultar-dni?dni=77100148')
+            ->assertOk()
+            ->assertJsonPath('registrado', true)
+            ->assertJsonPath('message', 'Docente ya registrado');
+        $this->postJson('/api/docentes', [
+            'dni' => '77100148', 'nombres' => 'Otra persona',
+            'apellido_paterno' => 'Quispe', 'genero' => 'FEMENINO',
+            'grado' => 'Dra.', 'categoria' => 'CONTRATADO',
+            'escuela_id' => 1, 'email' => 'otra@example.com', 'activo' => true,
+        ])->assertUnprocessable()->assertJsonValidationErrors('dni');
+        Http::assertNothingSent();
+    }
+
+    public function test_permite_registrar_de_nuevo_un_docente_eliminado(): void
+    {
+        DB::table('docentes')->insert([
+            'id' => 1, 'dni' => '77100148', 'nombres' => 'Nombre anterior',
+            'apellido_paterno' => 'Anterior', 'escuela_id' => 1, 'activo' => 0,
+            'created_at' => '2025-01-01 00:00:00', 'deleted_at' => now(),
+        ]);
+        config(['services.apisperu.token' => 'token-prueba']);
+        Http::fake(['dniruc.apisperu.com/*' => Http::response([
+            'success' => true, 'nombres' => 'Maria Elena',
+            'apellidoPaterno' => 'Quispe', 'apellidoMaterno' => 'Rojas',
+        ])]);
+
+        $this->getJson('/api/docentes/consultar-dni?dni=77100148')
+            ->assertOk()->assertJsonPath('registrado', false)
+            ->assertJsonPath('datos.nombres', 'Maria Elena');
+
+        $this->postJson('/api/docentes', [
+            'dni' => '77100148', 'nombres' => 'Maria Elena',
+            'apellido_paterno' => 'Quispe', 'apellido_materno' => 'Rojas',
+            'genero' => 'FEMENINO', 'grado' => 'Dra.',
+            'categoria' => 'CONTRATADO', 'escuela_id' => 1,
+            'email' => 'maria@example.com', 'activo' => true,
+        ])->assertCreated()->assertJsonPath('id', 1)
+            ->assertJsonPath('nombres', 'Maria Elena')
+            ->assertJsonPath('activo', true);
+
+        $this->assertDatabaseCount('docentes', 1);
+        $this->assertDatabaseHas('docentes', [
+            'id' => 1, 'dni' => '77100148', 'deleted_at' => null,
+            'nombres' => 'Maria Elena', 'categoria' => 'CONTRATADO',
+        ]);
+        $this->getJson('/api/docentes')->assertOk()->assertJsonPath('total', 1);
+    }
+
+    public function test_no_elimina_un_docente_con_expedientes(): void
     {
         $datos = [
             'dni' => '98712345',
@@ -102,11 +180,24 @@ class DocenteRegistroTest extends TestCase
         DB::statement('CREATE TABLE expedientes (id INTEGER PRIMARY KEY, docente_id INTEGER, deleted_at TEXT)');
         DB::table('expedientes')->insert(['id' => 1, 'docente_id' => 1]);
 
-        $this->deleteJson('/api/docentes/1')->assertNoContent();
-        $this->assertSoftDeleted('docentes', ['id' => 1, 'activo' => 0]);
-        $this->getJson('/api/docentes/1')->assertNotFound();
-        $this->getJson('/api/docentes')->assertOk()->assertJsonPath('total', 0);
+        $this->deleteJson('/api/docentes/1')->assertStatus(409)
+            ->assertJsonPath('message', 'El docente tiene expedientes registrados. Desactívalo desde Modificar docente.');
+        $this->assertDatabaseHas('docentes', ['id' => 1, 'dni' => '98712345', 'activo' => 1, 'deleted_at' => null]);
+        $this->getJson('/api/docentes/1')->assertOk();
         $this->assertSame('Maria Elena', Expediente::find(1)->docente->nombres);
+    }
+
+    public function test_elimina_de_la_base_de_datos_un_docente_sin_expedientes(): void
+    {
+        DB::statement('CREATE TABLE expedientes (id INTEGER PRIMARY KEY, docente_id INTEGER, deleted_at TEXT)');
+        DB::table('docentes')->insert([
+            'id' => 1, 'dni' => '98712345', 'nombres' => 'Maria', 'apellido_paterno' => 'Quispe',
+            'escuela_id' => 1, 'activo' => 1,
+        ]);
+
+        $this->deleteJson('/api/docentes/1')->assertNoContent();
+        $this->assertDatabaseCount('docentes', 0);
+        $this->getJson('/api/docentes')->assertOk()->assertJsonPath('total', 0);
     }
 
     public function test_cambio_de_estado_solo_actualiza_activo_y_exige_autorizacion(): void

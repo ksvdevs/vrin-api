@@ -19,7 +19,9 @@ class DocenteRequest extends FormRequest
             'dni' => [
                 'required',
                 'regex:/^[0-9]{8}$/',
-                Rule::unique('docentes', 'dni')->ignore($this->route('docente')),
+                $this->isMethod('post')
+                    ? Rule::unique('docentes', 'dni')->withoutTrashed()
+                    : Rule::unique('docentes', 'dni')->ignore($this->route('docente')),
             ],
             'nombres' => ['required', 'string', 'max:100'],
             'apellido_paterno' => ['required', 'string', 'max:80'],
@@ -42,7 +44,7 @@ class DocenteRequest extends FormRequest
         return [
             'dni.required' => 'El DNI es obligatorio.',
             'dni.regex' => 'El DNI debe tener exactamente 8 dígitos numéricos.',
-            'dni.unique' => 'Ya existe un docente registrado con ese DNI.',
+            'dni.unique' => 'Docente ya registrado',
             'nombres.required' => 'Los nombres son obligatorios.',
             'apellido_paterno.required' => 'El apellido paterno es obligatorio.',
             'genero.required' => 'El género es obligatorio.',

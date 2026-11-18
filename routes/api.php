@@ -39,6 +39,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/escuelas', [EscuelaController::class, 'store']);
 
     // Fase 1: búsqueda (?q=) y CRUD de docentes (destroy = baja lógica).
+    Route::get('/docentes/consultar-dni', [DocenteController::class, 'consultarDni'])->middleware('throttle:30,1');
     Route::patch('/docentes/{docente}/estado', [DocenteController::class, 'cambiarEstado']);
     Route::apiResource('docentes', DocenteController::class);
 
