@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests;
 
+use App\Models\Usuario;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreUsuarioRequest extends FormRequest
 {
@@ -13,16 +15,21 @@ class StoreUsuarioRequest extends FormRequest
     }
 
     /**
-     * @return array<string, array<int, string>>
+     * @return array<string, array<int, mixed>>
      */
     public function rules(): array
     {
+        $usuarioEliminado = Usuario::withTrashed()
+            ->where('dni', $this->input('dni'))
+            ->whereNotNull('deleted_at')
+            ->first();
+
         return [
-            'dni' => ['required', 'digits:8', 'unique:usuarios,dni'],
+            'dni' => ['required', 'digits:8', Rule::unique('usuarios', 'dni')->ignore($usuarioEliminado?->id)],
             'nombres' => ['required', 'string', 'max:100'],
             'apellidos' => ['required', 'string', 'max:150'],
-            'email' => ['required', 'email', 'ends_with:@unamba.edu.pe', 'unique:usuarios,email'],
-            'password' => ['required', 'string', 'min:8'],
+            'email' => ['required', 'email', 'ends_with:@unamba.edu.pe', Rule::unique('usuarios', 'email')->ignore($usuarioEliminado?->id)],
+            'password' => ['prohibited'],
             'rol_id' => ['required', 'exists:roles,id'],
             'activo' => ['boolean'],
         ];
@@ -40,8 +47,7 @@ class StoreUsuarioRequest extends FormRequest
             'email.email' => 'El correo electrónico no tiene un formato válido.',
             'email.ends_with' => 'El correo debe pertenecer al dominio @unamba.edu.pe.',
             'email.unique' => 'Ya existe un usuario registrado con ese correo.',
-            'password.required' => 'La contraseña es obligatoria.',
-            'password.min' => 'La contraseña debe tener al menos 8 caracteres.',
+            'password.prohibited' => 'La contraseña se genera y envía al correo automáticamente.',
             'rol_id.required' => 'El rol es obligatorio.',
             'rol_id.exists' => 'El rol seleccionado no existe.',
         ];

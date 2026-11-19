@@ -71,6 +71,6 @@ class DocumentoGenerado extends Model
 
     public function generador()
     {
-        return $this->belongsTo(Usuario::class, 'generado_por');
+        return $this->belongsTo(ActorHistorico::class, 'generado_por');
     }
 }

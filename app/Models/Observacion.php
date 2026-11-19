@@ -34,6 +34,6 @@ class Observacion extends Model
 
     public function creador()
     {
-        return $this->belongsTo(Usuario::class, 'creada_por');
+        return $this->belongsTo(ActorHistorico::class, 'creada_por');
     }
 }

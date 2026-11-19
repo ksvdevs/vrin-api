@@ -44,6 +44,6 @@ class Archivo extends Model
 
     public function subidor()
     {
-        return $this->belongsTo(Usuario::class, 'subido_por');
+        return $this->belongsTo(ActorHistorico::class, 'subido_por');
     }
 }

@@ -95,7 +95,7 @@ class RendicionPaso4Test extends TestCase
         ])->assertStatus(409);
     }
 
-    public function test_un_expediente_rendido_no_admite_archivos_cambios_ni_eliminacion(): void
+    public function test_un_expediente_rendido_no_admite_cambios_pero_admin_puede_retirarlo(): void
     {
         $this->postJson('/api/expedientes/2/archivos', [
             'tipo' => 'COMPROBANTE_RENDICION',
@@ -110,8 +110,22 @@ class RendicionPaso4Test extends TestCase
             'doi' => '10.1234/prueba',
         ])->assertStatus(409);
 
-        $this->deleteJson('/api/expedientes/2')->assertForbidden();
-        $this->assertDatabaseHas('expedientes', ['id' => 2, 'estado' => 'RENDIDO']);
+        $this->deleteJson('/api/expedientes/2')->assertNoContent();
+        $this->assertNotNull(DB::table('expedientes')->where('id', 2)->value('deleted_at'));
+        $this->assertDatabaseHas('archivos', ['id' => 12, 'expediente_id' => 2]);
+    }
+
+    public function test_secretaria_no_puede_retirar_un_expediente_rendido(): void
+    {
+        $secretaria = new Usuario;
+        $secretaria->forceFill(['id' => 2, 'nombres' => 'Secretaria', 'apellidos' => 'Prueba']);
+        $secretaria->setRelation('rolRef', new Rol(['nombre' => 'Secretaría']));
+        $this->actingAs($secretaria);
+
+        $this->deleteJson('/api/expedientes/2')
+            ->assertForbidden()
+            ->assertJsonPath('message', 'Solo un administrador puede retirar un expediente rendido.');
+        $this->assertNull(DB::table('expedientes')->where('id', 2)->value('deleted_at'));
     }
 
     public function test_la_carta_docente_no_se_reemplaza_despues_de_validacion(): void

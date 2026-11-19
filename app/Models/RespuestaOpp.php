@@ -42,6 +42,6 @@ class RespuestaOpp extends Model
 
     public function registrador()
     {
-        return $this->belongsTo(Usuario::class, 'registrado_por');
+        return $this->belongsTo(ActorHistorico::class, 'registrado_por');
     }
 }

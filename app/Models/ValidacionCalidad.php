@@ -39,6 +39,6 @@ class ValidacionCalidad extends Model
 
     public function validador()
     {
-        return $this->belongsTo(Usuario::class, 'validado_por');
+        return $this->belongsTo(ActorHistorico::class, 'validado_por');
     }
 }

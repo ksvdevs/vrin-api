@@ -19,15 +19,17 @@ use App\Http\Controllers\RespuestaOppController;
 use App\Http\Controllers\RolController;
 use App\Http\Controllers\UsuarioController;
 use App\Http\Controllers\ValidacionController;
+use App\Http\Middleware\EnsureActiveUser;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
 
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', EnsureActiveUser::class])->group(function () {
 
     Route::post('/logout', [AuthController::class, 'logout']);
 
     Route::get('/usuarios/validar-dni', [UsuarioController::class, 'validarDni']);
+    Route::get('/usuarios/consultar-dni', [UsuarioController::class, 'consultarDni'])->middleware('throttle:30,1');
     Route::apiResource('usuarios', UsuarioController::class);
     Route::apiResource('roles', RolController::class)
         ->only(['index', 'store', 'update', 'destroy'])

@@ -55,6 +55,6 @@ class Rendicion extends Model
 
     public function cerrador()
     {
-        return $this->belongsTo(Usuario::class, 'cerrada_por');
+        return $this->belongsTo(ActorHistorico::class, 'cerrada_por');
     }
 }

@@ -4,6 +4,7 @@ namespace App\Policies;
 
 use App\Models\Expediente;
 use App\Models\Usuario;
+use Illuminate\Auth\Access\Response;
 
 class ExpedientePolicy
 {
@@ -103,8 +104,18 @@ class ExpedientePolicy
         return in_array($user->rol_codigo, self::ROLES_REGISTRO, true);
     }
 
-    public function delete(Usuario $user, Expediente $expediente): bool
+    public function delete(Usuario $user, Expediente $expediente): Response
     {
-        return in_array($user->rol_codigo, self::ROLES_REGISTRO, true) && $expediente->estado !== 'RENDIDO';
+        if ($user->rol_codigo === 'ADMINISTRADOR_GENERAL') {
+            return Response::allow();
+        }
+
+        if ($user->rol_codigo === 'SECRETARIA' && $expediente->estado === 'RENDIDO') {
+            return Response::deny('Solo un administrador puede retirar un expediente rendido.');
+        }
+
+        return $user->rol_codigo === 'SECRETARIA'
+            ? Response::allow()
+            : Response::deny('No tienes permiso para retirar expedientes.');
     }
 }

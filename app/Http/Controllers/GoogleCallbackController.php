@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Usuario;
 use App\Services\AuditoriaService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -11,53 +13,35 @@ use Laravel\Socialite\Facades\Socialite;
 
 class GoogleCallbackController extends Controller
 {
-    public function redirect()
+    public function redirect(): RedirectResponse|JsonResponse
     {
         if (empty(config('services.google.client_id'))) {
             return response()->json(['message' => 'Autenticación con Google aún no está habilitada.'], 503);
         }
 
-        // Simulador de Google para entorno local (evita configurar OAuth real en desarrollo)
-        if (app()->environment('local')) {
-            return redirect('/api/auth/google/callback?simulated_email=ksegundo@unamba.edu.pe');
-        }
-
         return Socialite::driver('google')
-            ->with(['hd' => 'unamba.edu.pe'])
+            ->with(['hd' => 'unamba.edu.pe', 'prompt' => 'select_account'])
             ->redirect();
     }
 
-    public function callback(Request $request)
+    public function callback(Request $request): RedirectResponse
     {
         try {
-            if (app()->environment('local') && $request->has('simulated_email')) {
-                $email = $request->get('simulated_email');
-                $googleId = 'simulated_'.rand(1000, 9999);
-            } else {
-                $googleUser = Socialite::driver('google')->user();
-                $email = $googleUser->email;
-                $googleId = $googleUser->id;
-            }
+            $googleUser = Socialite::driver('google')->user();
+            $email = strtolower((string) $googleUser->email);
+            $googleId = (string) $googleUser->id;
 
-            if (! str_ends_with($email, '@unamba.edu.pe')) {
+            if (! str_ends_with($email, '@unamba.edu.pe') || ! filter_var($googleUser->user['email_verified'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
                 return redirect(config('app.frontend_url').'/login?error=dominio_invalido');
             }
 
             $usuario = Usuario::where('email', $email)->first();
 
-            // Si es entorno local y el usuario no existe, lo creamos para que pueda probar
-            if (app()->environment('local') && ! $usuario) {
-                $usuario = Usuario::create([
-                    'dni' => '99999999',
-                    'nombres' => 'Kely',
-                    'apellidos' => 'Segundo (Simulado)',
-                    'email' => $email,
-                    'rol_id' => 1,
-                    'activo' => true,
-                ]);
+            if (! $usuario || ! $usuario->activo) {
+                return redirect(config('app.frontend_url').'/login?error=acceso_denegado');
             }
 
-            if (! $usuario || ! $usuario->activo) {
+            if (! empty($usuario->google_sub) && $usuario->google_sub !== $googleId) {
                 return redirect(config('app.frontend_url').'/login?error=acceso_denegado');
             }
 
@@ -74,7 +58,8 @@ class GoogleCallbackController extends Controller
                 'usuario_id' => $usuario->id,
             ]);
 
-            Auth::login($usuario);
+            Auth::guard('web')->login($usuario);
+            $request->session()->regenerate();
 
             return redirect(config('app.frontend_url').'/');
 

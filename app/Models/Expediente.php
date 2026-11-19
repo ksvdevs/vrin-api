@@ -55,12 +55,12 @@ class Expediente extends Model
 
     public function creador()
     {
-        return $this->belongsTo(Usuario::class, 'created_by');
+        return $this->belongsTo(ActorHistorico::class, 'created_by');
     }
 
     public function editor()
     {
-        return $this->belongsTo(Usuario::class, 'updated_by');
+        return $this->belongsTo(ActorHistorico::class, 'updated_by');
     }
 
     // Detalle del módulo Artículos (1:1)

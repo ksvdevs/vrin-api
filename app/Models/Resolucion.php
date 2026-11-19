@@ -38,6 +38,6 @@ class Resolucion extends Model
 
     public function emisor()
     {
-        return $this->belongsTo(Usuario::class, 'emitida_por');
+        return $this->belongsTo(ActorHistorico::class, 'emitida_por');
     }
 }

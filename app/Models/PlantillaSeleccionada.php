@@ -44,6 +44,6 @@ class PlantillaSeleccionada extends Model
 
     public function seleccionador()
     {
-        return $this->belongsTo(Usuario::class, 'seleccionado_por');
+        return $this->belongsTo(ActorHistorico::class, 'seleccionado_por');
     }
 }

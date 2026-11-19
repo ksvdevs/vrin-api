@@ -39,7 +39,7 @@ class Plantilla extends Model
 
     public function creador()
     {
-        return $this->belongsTo(Usuario::class, 'created_by');
+        return $this->belongsTo(ActorHistorico::class, 'created_by');
     }
 
     public function documentosGenerados()

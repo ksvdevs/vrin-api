@@ -28,7 +28,7 @@ class AuthController extends Controller
             return response()->json(['message' => 'Usuario inactivo. Contacte al administrador del VRIN.'], 403);
         }
 
-        Auth::login($usuario);
+        Auth::guard('web')->login($usuario);
         $request->session()->regenerate();
 
         $usuario->ultimo_login_at = now();
