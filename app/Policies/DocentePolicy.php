@@ -23,7 +23,7 @@ class DocentePolicy
 
     public function create(Usuario $user): bool
     {
-        return $user->rol_codigo === self::ROL_ADMINISTRADOR;
+        return in_array($user->rol_codigo, [self::ROL_ADMINISTRADOR, 'SECRETARIA'], true);
     }
 
     public function update(Usuario $user, Docente $docente): bool

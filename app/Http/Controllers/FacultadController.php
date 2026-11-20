@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Facultad;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -27,6 +28,21 @@ class FacultadController extends Controller
                 ->map(fn ($e) => ['id' => $e->id, 'nombre' => $e->nombre])
                 ->values(),
         ])->values());
+    }
+
+    public function escuelas(Facultad $facultad): JsonResponse
+    {
+        abort_unless($facultad->activo, 404);
+
+        return response()->json($facultad->escuelas()
+            ->where('activo', true)
+            ->orderBy('nombre')
+            ->get(['id', 'nombre'])
+            ->map(fn ($escuela) => [
+                'id' => $escuela->id,
+                'nombre' => $escuela->nombre,
+            ])
+            ->values());
     }
 
     public function store(Request $request)

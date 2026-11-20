@@ -17,10 +17,16 @@ class DocenteRegistroTest extends TestCase
         DB::unprepared(<<<'SQL'
             CREATE TABLE facultades (id INTEGER PRIMARY KEY, nombre TEXT, deleted_at TEXT);
             CREATE TABLE escuelas (id INTEGER PRIMARY KEY, facultad_id INTEGER, deleted_at TEXT);
-            CREATE TABLE docentes (id INTEGER PRIMARY KEY, dni TEXT UNIQUE, nombres TEXT,
+            CREATE TABLE docentes (id INTEGER PRIMARY KEY AUTOINCREMENT, dni TEXT UNIQUE, nombres TEXT,
                 apellido_paterno TEXT, apellido_materno TEXT, genero TEXT, celular TEXT,
                 grado TEXT, tipo_contrato TEXT, categoria TEXT, escuela_id INTEGER, email TEXT, activo INTEGER,
                 created_at TEXT, updated_at TEXT, deleted_at TEXT);
+            CREATE TABLE docentes_historicos (id INTEGER PRIMARY KEY, dni TEXT, nombres TEXT,
+                apellido_paterno TEXT, apellido_materno TEXT, genero TEXT, celular TEXT,
+                grado TEXT, tipo_contrato TEXT, categoria TEXT, escuela_id INTEGER, email TEXT, activo INTEGER,
+                created_at TEXT, updated_at TEXT, deleted_at TEXT);
+            CREATE TABLE expedientes (id INTEGER PRIMARY KEY, docente_id INTEGER, deleted_at TEXT,
+                FOREIGN KEY (docente_id) REFERENCES docentes_historicos(id) ON DELETE RESTRICT);
             SQL);
         DB::table('facultades')->insert(['id' => 1, 'nombre' => 'Ingeniería']);
         DB::table('escuelas')->insert(['id' => 1, 'facultad_id' => 1]);
@@ -77,6 +83,45 @@ class DocenteRegistroTest extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrors(['genero', 'celular', 'email', 'activo']);
 
         $this->assertDatabaseCount('docentes', 0);
+    }
+
+    public function test_no_permite_repetir_el_correo_al_registrar_o_editar(): void
+    {
+        $datos = [
+            'dni' => '98712345', 'nombres' => 'Maria', 'apellido_paterno' => 'Quispe',
+            'genero' => 'FEMENINO', 'grado' => 'Dra.', 'categoria' => 'CONTRATADO',
+            'escuela_id' => 1, 'email' => 'maria@example.com', 'activo' => true,
+        ];
+
+        $this->postJson('/api/docentes', $datos)->assertCreated();
+        $this->postJson('/api/docentes', [
+            ...$datos, 'dni' => '98712346', 'email' => '  MARIA@EXAMPLE.COM  ',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('email')
+            ->assertJsonPath('errors.email.0', 'Este correo electrónico ya está registrado por otro docente.');
+        $this->assertDatabaseCount('docentes', 1);
+
+        $otrosDatos = [...$datos, 'dni' => '98712346', 'email' => 'otra@example.com'];
+        $this->postJson('/api/docentes', $otrosDatos)->assertCreated();
+        $this->putJson('/api/docentes/2', [...$otrosDatos, 'email' => 'MARIA@EXAMPLE.COM'])
+            ->assertUnprocessable()->assertJsonValidationErrors('email');
+        $this->putJson('/api/docentes/1', [...$datos, 'nombres' => 'Maria Elena'])
+            ->assertOk()->assertJsonPath('email', 'maria@example.com');
+        $this->assertDatabaseHas('docentes', ['id' => 2, 'email' => 'otra@example.com']);
+    }
+
+    public function test_permite_editar_otro_dato_de_un_docente_con_correo_previamente_duplicado(): void
+    {
+        DB::table('docentes')->insert([
+            ['id' => 1, 'dni' => '98712345', 'nombres' => 'Maria', 'apellido_paterno' => 'Quispe', 'email' => 'compartido@example.com', 'escuela_id' => 1, 'activo' => 1],
+            ['id' => 2, 'dni' => '98712346', 'nombres' => 'Elena', 'apellido_paterno' => 'Rojas', 'email' => 'compartido@example.com', 'escuela_id' => 1, 'activo' => 1],
+        ]);
+
+        $this->putJson('/api/docentes/1', [
+            'dni' => '98712345', 'nombres' => 'Maria Elena', 'apellido_paterno' => 'Quispe',
+            'genero' => 'FEMENINO', 'grado' => 'Dra.', 'categoria' => 'CONTRATADO',
+            'escuela_id' => 1, 'email' => 'COMPARTIDO@EXAMPLE.COM', 'activo' => true,
+        ])->assertOk()->assertJsonPath('email', 'compartido@example.com');
     }
 
     public function test_consulta_dni_y_completa_los_datos_si_no_esta_registrado(): void
@@ -156,7 +201,7 @@ class DocenteRegistroTest extends TestCase
         $this->getJson('/api/docentes')->assertOk()->assertJsonPath('total', 1);
     }
 
-    public function test_no_elimina_un_docente_con_expedientes(): void
+    public function test_no_elimina_un_docente_con_expedientes_incluso_si_estan_retirados(): void
     {
         $datos = [
             'dni' => '98712345',
@@ -177,19 +222,28 @@ class DocenteRegistroTest extends TestCase
         $this->putJson('/api/docentes/1', [...$datos, 'nombres' => 'Maria Elena'])
             ->assertOk()->assertJsonPath('nombres', 'Maria Elena');
 
-        DB::statement('CREATE TABLE expedientes (id INTEGER PRIMARY KEY, docente_id INTEGER, deleted_at TEXT)');
+        DB::statement('PRAGMA foreign_keys = ON');
         DB::table('expedientes')->insert(['id' => 1, 'docente_id' => 1]);
 
+        $this->getJson('/api/docentes')->assertOk()->assertJsonPath('data.0.tiene_expedientes', true);
         $this->deleteJson('/api/docentes/1')->assertStatus(409)
             ->assertJsonPath('message', 'El docente tiene expedientes registrados. Desactívalo desde Modificar docente.');
-        $this->assertDatabaseHas('docentes', ['id' => 1, 'dni' => '98712345', 'activo' => 1, 'deleted_at' => null]);
+        $this->assertDatabaseHas('docentes', ['id' => 1, 'dni' => '98712345', 'deleted_at' => null]);
+        $this->assertDatabaseHas('docentes_historicos', ['id' => 1, 'nombres' => 'Maria Elena']);
         $this->getJson('/api/docentes/1')->assertOk();
+        $this->getJson('/api/docentes')->assertOk()->assertJsonPath('total', 1);
+        $this->assertDatabaseHas('expedientes', ['id' => 1, 'docente_id' => 1]);
         $this->assertSame('Maria Elena', Expediente::find(1)->docente->nombres);
+
+        DB::table('expedientes')->where('id', 1)->update(['deleted_at' => now()]);
+        $this->deleteJson('/api/docentes/1')->assertStatus(409);
+        $this->assertDatabaseHas('docentes', ['id' => 1, 'deleted_at' => null]);
+        $this->assertDatabaseHas('expedientes', ['id' => 1, 'docente_id' => 1]);
+        $this->assertSame('Maria Elena', Expediente::withTrashed()->find(1)->docente->nombres);
     }
 
     public function test_elimina_de_la_base_de_datos_un_docente_sin_expedientes(): void
     {
-        DB::statement('CREATE TABLE expedientes (id INTEGER PRIMARY KEY, docente_id INTEGER, deleted_at TEXT)');
         DB::table('docentes')->insert([
             'id' => 1, 'dni' => '98712345', 'nombres' => 'Maria', 'apellido_paterno' => 'Quispe',
             'escuela_id' => 1, 'activo' => 1,
@@ -197,7 +251,26 @@ class DocenteRegistroTest extends TestCase
 
         $this->deleteJson('/api/docentes/1')->assertNoContent();
         $this->assertDatabaseCount('docentes', 0);
+        $this->assertDatabaseCount('docentes_historicos', 0);
         $this->getJson('/api/docentes')->assertOk()->assertJsonPath('total', 0);
+    }
+
+    public function test_no_elimina_un_docente_registrado_de_nuevo_si_conserva_expedientes_historicos(): void
+    {
+        DB::table('docentes')->insert([
+            'id' => 2, 'dni' => '98712345', 'nombres' => 'Maria', 'apellido_paterno' => 'Quispe',
+            'escuela_id' => 1, 'activo' => 1,
+        ]);
+        DB::table('docentes_historicos')->insert([
+            'id' => 1, 'dni' => '98712345', 'nombres' => 'Maria', 'apellido_paterno' => 'Quispe',
+            'deleted_at' => now(),
+        ]);
+        DB::table('expedientes')->insert(['id' => 1, 'docente_id' => 1]);
+
+        $this->getJson('/api/docentes')->assertOk()->assertJsonPath('data.0.tiene_expedientes', true);
+        $this->deleteJson('/api/docentes/2')->assertStatus(409);
+        $this->assertDatabaseHas('docentes', ['id' => 2, 'dni' => '98712345']);
+        $this->assertDatabaseHas('expedientes', ['id' => 1, 'docente_id' => 1]);
     }
 
     public function test_cambio_de_estado_solo_actualiza_activo_y_exige_autorizacion(): void
@@ -223,5 +296,43 @@ class DocenteRegistroTest extends TestCase
         $this->patchJson('/api/docentes/1/estado', ['activo' => true])->assertForbidden();
         $this->putJson('/api/docentes/1', ['activo' => true])->assertForbidden();
         $this->deleteJson('/api/docentes/1')->assertForbidden();
+    }
+
+    public function test_secretaria_puede_consultar_dni_y_registrar_docente_sin_permiso_de_edicion_o_eliminacion(): void
+    {
+        $usuario = new Usuario;
+        $usuario->forceFill(['id' => 2]);
+        $usuario->setRelation('rolRef', new Rol(['nombre' => 'Secretaria']));
+        $this->actingAs($usuario);
+
+        config(['services.apisperu.token' => 'token-prueba']);
+        Http::fake(['dniruc.apisperu.com/*' => Http::response([
+            'success' => true, 'nombres' => 'Maria Elena',
+            'apellidoPaterno' => 'Quispe', 'apellidoMaterno' => 'Rojas',
+        ])]);
+
+        $this->getJson('/api/docentes/consultar-dni?dni=77100148')
+            ->assertOk()->assertJsonPath('datos.nombres', 'Maria Elena');
+        $this->postJson('/api/docentes', [
+            'dni' => '77100148', 'nombres' => 'Maria Elena',
+            'apellido_paterno' => 'Quispe', 'apellido_materno' => 'Rojas',
+            'genero' => 'FEMENINO', 'grado' => 'Dra.', 'categoria' => 'CONTRATADO',
+            'escuela_id' => 1, 'email' => 'maria@example.com', 'activo' => true,
+        ])->assertCreated()->assertJsonPath('dni', '77100148');
+
+        $this->getJson('/api/docentes')->assertOk()->assertJsonPath('total', 1);
+        $this->putJson('/api/docentes/1', ['nombres' => 'Cambio'])->assertForbidden();
+        $this->deleteJson('/api/docentes/1')->assertForbidden();
+    }
+
+    public function test_calidad_no_puede_consultar_dni_ni_registrar_docentes(): void
+    {
+        $usuario = new Usuario;
+        $usuario->forceFill(['id' => 3]);
+        $usuario->setRelation('rolRef', new Rol(['nombre' => 'Calidad']));
+        $this->actingAs($usuario);
+
+        $this->getJson('/api/docentes/consultar-dni?dni=77100148')->assertForbidden();
+        $this->postJson('/api/docentes', [])->assertForbidden();
     }
 }

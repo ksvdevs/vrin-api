@@ -37,10 +37,11 @@ Route::middleware(['auth:sanctum', EnsureActiveUser::class])->group(function () 
 
     // Fase 1: catálogos en cascada (facultades con escuelas activas).
     Route::get('/facultades', [FacultadController::class, 'index']);
+    Route::get('/facultades/{facultad}/escuelas', [FacultadController::class, 'escuelas']);
     Route::post('/facultades', [FacultadController::class, 'store']);
     Route::post('/escuelas', [EscuelaController::class, 'store']);
 
-    // Fase 1: búsqueda (?q=) y CRUD de docentes (destroy = baja lógica).
+    // Fase 1: búsqueda (?q=) y CRUD de docentes.
     Route::get('/docentes/consultar-dni', [DocenteController::class, 'consultarDni'])->middleware('throttle:30,1');
     Route::patch('/docentes/{docente}/estado', [DocenteController::class, 'cambiarEstado']);
     Route::apiResource('docentes', DocenteController::class);
@@ -59,6 +60,7 @@ Route::middleware(['auth:sanctum', EnsureActiveUser::class])->group(function () 
     Route::get('/expedientes/{expediente}', [ExpedienteController::class, 'show']);
     Route::put('/expedientes/{expediente}', [ExpedienteController::class, 'update']);
     Route::delete('/expedientes/{expediente}', [ExpedienteController::class, 'destroy']);
+    Route::delete('/expedientes/{expediente}/definitivo', [ExpedienteController::class, 'eliminarDefinitivo']);
     Route::get('/expedientes/{expediente}/archivos/{archivo}', [ExpedienteController::class, 'archivo']);
     Route::delete('/expedientes/{expediente}/archivos/{archivo}', [ExpedienteController::class, 'retirarComprobante']);
 
@@ -98,6 +100,7 @@ Route::middleware(['auth:sanctum', EnsureActiveUser::class])->group(function () 
 
     // Fase 8 — Etapa 4: Rendición.
     Route::post('/expedientes/{expediente}/rendicion/desembolso', [RendicionController::class, 'registrarDesembolso']);
+    Route::put('/expedientes/{expediente}/rendicion/desembolso', [RendicionController::class, 'actualizarDesembolso']);
     Route::patch('/expedientes/{expediente}/rendicion/fecha-limite', [RendicionController::class, 'actualizarFechaLimite']);
     Route::post('/expedientes/{expediente}/rendicion/doi', [RendicionController::class, 'actualizarDoi']);
     Route::post('/expedientes/{expediente}/rendicion/cerrar', [RendicionController::class, 'cerrarRendicion']);

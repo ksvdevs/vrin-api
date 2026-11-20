@@ -2,6 +2,7 @@
 
 namespace App\Listeners;
 
+use App\Events\DesembolsoActualizado;
 use App\Events\DocumentoGeneradoCreado;
 use App\Events\EstadoCambiado;
 use App\Events\ExpedienteRegistrado;
@@ -16,8 +17,21 @@ class EscribirAuditoria
 {
     public function __construct(private readonly AuditoriaService $auditoria) {}
 
-    public function handle(EstadoCambiado|ExpedienteRegistrado|PlantillaSeleccionada|DocumentoGeneradoCreado $evento): void
+    public function handle(EstadoCambiado|ExpedienteRegistrado|PlantillaSeleccionada|DocumentoGeneradoCreado|DesembolsoActualizado $evento): void
     {
+        if ($evento instanceof DesembolsoActualizado) {
+            $this->auditoria->registrar('rendicion.desembolso_actualizado', [
+                'expediente_id' => $evento->expediente->id,
+                'usuario_id' => $evento->actor->id,
+                'entidad' => 'rendiciones',
+                'entidad_id' => $evento->expediente->id,
+                'antes' => $evento->antes,
+                'despues' => $evento->despues,
+            ]);
+
+            return;
+        }
+
         if ($evento instanceof DocumentoGeneradoCreado) {
             $this->auditoria->registrar('documento.generado', [
                 'expediente_id' => $evento->documento->expediente_id,

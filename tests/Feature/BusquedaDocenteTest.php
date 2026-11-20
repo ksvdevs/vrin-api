@@ -16,6 +16,8 @@ class BusquedaDocenteTest extends TestCase
             CREATE TABLE docentes (id INTEGER PRIMARY KEY, dni TEXT, nombres TEXT,
                 apellido_paterno TEXT, apellido_materno TEXT, genero TEXT, categoria TEXT, activo INTEGER,
                 escuela_id INTEGER, created_at TEXT, deleted_at TEXT);
+            CREATE TABLE expedientes (id INTEGER PRIMARY KEY, docente_id INTEGER, deleted_at TEXT);
+            CREATE TABLE docentes_historicos (id INTEGER PRIMARY KEY, dni TEXT, deleted_at TEXT);
             CREATE TABLE escuelas (id INTEGER PRIMARY KEY, nombre TEXT, facultad_id INTEGER, deleted_at TEXT);
             CREATE TABLE facultades (id INTEGER PRIMARY KEY, nombre TEXT, deleted_at TEXT);
             SQL);

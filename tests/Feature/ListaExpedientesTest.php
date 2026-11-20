@@ -18,6 +18,8 @@ class ListaExpedientesTest extends TestCase
         DB::unprepared(<<<'SQL'
             CREATE TABLE docentes (id INTEGER PRIMARY KEY, nombres TEXT, apellido_paterno TEXT,
                 apellido_materno TEXT, dni TEXT, grado TEXT, escuela_id INTEGER, deleted_at TEXT);
+            CREATE TABLE docentes_historicos (id INTEGER PRIMARY KEY, nombres TEXT, apellido_paterno TEXT,
+                apellido_materno TEXT, dni TEXT, grado TEXT, escuela_id INTEGER, deleted_at TEXT);
             CREATE TABLE escuelas (id INTEGER PRIMARY KEY, facultad_id INTEGER, deleted_at TEXT);
             CREATE TABLE facultades (id INTEGER PRIMARY KEY, deleted_at TEXT);
             CREATE TABLE expedientes (id INTEGER PRIMARY KEY, codigo TEXT, docente_id INTEGER,
@@ -78,7 +80,12 @@ class ListaExpedientesTest extends TestCase
 
     public function test_conserva_la_busqueda_y_el_nombre_del_docente_dado_de_baja(): void
     {
-        DB::table('docentes')->where('id', 1)->update(['deleted_at' => '2026-10-10 12:00:00']);
+        DB::table('docentes_historicos')->insert([
+            'id' => 1, 'nombres' => 'Luis Ricardo', 'apellido_paterno' => 'Paredes',
+            'apellido_materno' => 'Quiroz', 'dni' => '41982310',
+            'deleted_at' => '2026-10-10 12:00:00',
+        ]);
+        DB::table('docentes')->where('id', 1)->delete();
 
         $this->getJson('/api/expedientes?busqueda=41982310')
             ->assertOk()->assertJsonPath('meta.total', 1)

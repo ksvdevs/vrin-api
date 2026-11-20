@@ -48,6 +48,16 @@ class Expediente extends Model
         return $this->belongsTo(Docente::class, 'docente_id')->withTrashed();
     }
 
+    public function docenteHistorico()
+    {
+        return $this->belongsTo(DocenteHistorico::class, 'docente_id')->withTrashed();
+    }
+
+    public function getDocenteAttribute(): ?Docente
+    {
+        return $this->getRelationValue('docente') ?? $this->getRelationValue('docenteHistorico');
+    }
+
     public function escuela()
     {
         return $this->belongsTo(Escuela::class, 'escuela_id');

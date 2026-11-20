@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Events\EstadoCambiado;
 use App\Models\Rol;
 use App\Models\Usuario;
+use Carbon\Carbon;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -32,6 +33,11 @@ class RendicionPaso4Test extends TestCase
                 con_retraso INTEGER, cerrada_por INTEGER, cerrada_at TEXT,
                 created_at TEXT, updated_at TEXT);
             CREATE TABLE expediente_articulos (expediente_id INTEGER PRIMARY KEY, doi TEXT, updated_at TEXT);
+            CREATE TABLE observaciones (id INTEGER PRIMARY KEY, expediente_id INTEGER, etapa INTEGER,
+                origen TEXT, texto TEXT, resuelta_at TEXT, creada_por INTEGER, created_at TEXT);
+            CREATE TABLE auditoria (id INTEGER PRIMARY KEY, expediente_id INTEGER, usuario_id INTEGER,
+                accion TEXT, entidad TEXT, entidad_id INTEGER, antes TEXT, despues TEXT, ip TEXT,
+                created_at TEXT);
             SQL);
         DB::table('expedientes')->insert([
             ['id' => 1, 'estado' => 'POR_RENDIR'],
@@ -74,6 +80,106 @@ class RendicionPaso4Test extends TestCase
             'fecha_desembolso' => '2026-10-07',
             'monto_desembolsado' => 0,
         ])->assertUnprocessable()->assertJsonValidationErrors('monto_desembolsado');
+    }
+
+    public function test_corrige_fecha_y_monto_y_recalcula_el_plazo_con_auditoria(): void
+    {
+        Carbon::setTestNow('2026-11-20');
+        try {
+            DB::table('rendiciones')->insert([
+                'expediente_id' => 1, 'fecha_desembolso' => '2026-10-07',
+                'monto_desembolsado' => 1500, 'fecha_limite' => '2026-12-30', 'estado' => 'BORRADOR',
+            ]);
+
+            $secretaria = new Usuario;
+            $secretaria->forceFill(['id' => 2]);
+            $secretaria->setRelation('rolRef', new Rol(['nombre' => 'Secretaría']));
+            $this->actingAs($secretaria);
+
+            $this->putJson('/api/expedientes/1/rendicion/desembolso', [
+                'fecha_desembolso' => '2026-10-08', 'monto_desembolsado' => 1750.50,
+            ])->assertOk()->assertJsonPath('estado', 'POR_RENDIR');
+
+            $this->assertDatabaseHas('rendiciones', [
+                'expediente_id' => 1, 'fecha_desembolso' => '2026-10-08 00:00:00',
+                'monto_desembolsado' => 1750.50, 'fecha_limite' => '2026-12-31 00:00:00',
+            ]);
+            $auditoria = DB::table('auditoria')->where('accion', 'rendicion.desembolso_actualizado')->first();
+            $this->assertNotNull($auditoria);
+            $this->assertSame('2026-10-07', json_decode($auditoria->antes, true)['fecha_desembolso']);
+            $this->assertSame('2026-12-31', json_decode($auditoria->despues, true)['fecha_limite']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_corrige_un_desembolso_vencido_y_reabre_el_plazo(): void
+    {
+        Carbon::setTestNow('2026-11-20');
+        try {
+            DB::table('expedientes')->where('id', 1)->update(['estado' => 'RENDICION_VENCIDA']);
+            DB::table('rendiciones')->insert([
+                'expediente_id' => 1, 'fecha_desembolso' => '2026-08-26',
+                'monto_desembolsado' => 1000, 'fecha_limite' => '2026-11-19', 'estado' => 'BORRADOR',
+            ]);
+            DB::table('observaciones')->insert([
+                'expediente_id' => 1, 'etapa' => 4, 'origen' => 'SISTEMA',
+                'texto' => 'Plazo vencido', 'resuelta_at' => null,
+            ]);
+
+            $this->putJson('/api/expedientes/1/rendicion/desembolso', [
+                'fecha_desembolso' => '2026-11-20', 'monto_desembolsado' => 1000,
+            ])->assertOk()->assertJsonPath('estado', 'POR_RENDIR');
+
+            $this->assertDatabaseHas('expedientes', ['id' => 1, 'estado' => 'POR_RENDIR']);
+            $this->assertNotNull(DB::table('observaciones')->where('expediente_id', 1)->value('resuelta_at'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_la_fecha_corregida_puede_marcar_la_rendicion_como_vencida(): void
+    {
+        Carbon::setTestNow('2026-11-20');
+        try {
+            DB::table('rendiciones')->insert([
+                'expediente_id' => 1, 'fecha_desembolso' => '2026-10-07',
+                'monto_desembolsado' => 1500, 'fecha_limite' => '2026-12-30', 'estado' => 'BORRADOR',
+            ]);
+
+            $this->putJson('/api/expedientes/1/rendicion/desembolso', [
+                'fecha_desembolso' => '2026-01-01', 'monto_desembolsado' => 1500,
+            ])->assertOk()->assertJsonPath('estado', 'RENDICION_VENCIDA');
+
+            $this->assertDatabaseHas('expedientes', ['id' => 1, 'estado' => 'RENDICION_VENCIDA']);
+            $this->assertDatabaseHas('observaciones', [
+                'expediente_id' => 1, 'etapa' => 4, 'origen' => 'SISTEMA',
+            ]);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_calidad_y_rendiciones_cerradas_no_pueden_cambiar_el_desembolso(): void
+    {
+        DB::table('rendiciones')->insert([
+            'expediente_id' => 1, 'fecha_desembolso' => '2026-10-07',
+            'monto_desembolsado' => 1500, 'fecha_limite' => '2026-12-30', 'estado' => 'BORRADOR',
+        ]);
+        DB::table('rendiciones')->insert([
+            'expediente_id' => 2, 'fecha_desembolso' => '2026-10-07',
+            'monto_desembolsado' => 1500, 'fecha_limite' => '2026-12-30', 'estado' => 'CERRADA',
+        ]);
+
+        $payload = ['fecha_desembolso' => '2026-10-08', 'monto_desembolsado' => 2000];
+        $this->putJson('/api/expedientes/2/rendicion/desembolso', $payload)->assertStatus(409);
+
+        $calidad = new Usuario;
+        $calidad->forceFill(['id' => 2]);
+        $calidad->setRelation('rolRef', new Rol(['nombre' => 'Calidad']));
+        $this->actingAs($calidad);
+        $this->putJson('/api/expedientes/1/rendicion/desembolso', $payload)->assertForbidden();
+        $this->assertDatabaseHas('rendiciones', ['expediente_id' => 1, 'monto_desembolsado' => 1500]);
     }
 
     public function test_comprobante_debe_ser_pdf_jpg_o_png_y_requiere_desembolso_registrado(): void
@@ -123,8 +229,7 @@ class RendicionPaso4Test extends TestCase
         $this->actingAs($secretaria);
 
         $this->deleteJson('/api/expedientes/2')
-            ->assertForbidden()
-            ->assertJsonPath('message', 'Solo un administrador puede retirar un expediente rendido.');
+            ->assertForbidden();
         $this->assertNull(DB::table('expedientes')->where('id', 2)->value('deleted_at'));
     }
 

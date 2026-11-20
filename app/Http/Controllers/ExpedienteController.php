@@ -43,6 +43,7 @@ class ExpedienteController extends Controller
         $expedientes = Expediente::query()
             ->with([
                 'docente.escuela.facultad',
+                'docenteHistorico',
                 'articulo',
                 // Evita el N+1 de transicionesDisponibles() en el resource (2 EXISTS por fila).
                 'cartaVrin:expediente_id',
@@ -64,6 +65,12 @@ class ExpedienteController extends Controller
                 $patron = '%'.$palabra.'%';
                 $consulta->where('codigo', 'like', $patron)
                     ->orWhereHas('docente', function ($docente) use ($patron) {
+                        $docente->where('nombres', 'like', $patron)
+                            ->orWhere('apellido_paterno', 'like', $patron)
+                            ->orWhere('apellido_materno', 'like', $patron)
+                            ->orWhere('dni', 'like', $patron);
+                    })
+                    ->orWhereHas('docenteHistorico', function ($docente) use ($patron) {
                         $docente->where('nombres', 'like', $patron)
                             ->orWhere('apellido_paterno', 'like', $patron)
                             ->orWhere('apellido_materno', 'like', $patron)
@@ -91,6 +98,7 @@ class ExpedienteController extends Controller
 
         $expediente->load([
             'docente.escuela.facultad',
+            'docenteHistorico',
             'escuela.facultad',
             'articulo',
             'validacionCalidad.validador',
@@ -374,6 +382,7 @@ class ExpedienteController extends Controller
         $docente = Docente::findOrFail($datos['docente_id']);
 
         DB::transaction(function () use ($expediente, $datos, $docente) {
+            $docente = Docente::query()->whereKey($docente->id)->lockForUpdate()->firstOrFail();
             $updateData = [
                 'docente_id' => $docente->id,
                 'grado' => $docente->grado,
@@ -408,7 +417,33 @@ class ExpedienteController extends Controller
     public function destroy(Request $request, Expediente $expediente)
     {
         $this->authorize('delete', $expediente);
-        $expediente->delete(); // Soft delete
+        $expediente->delete();
+
+        return response()->noContent();
+    }
+
+    public function eliminarDefinitivo(Expediente $expediente)
+    {
+        DB::transaction(function () use ($expediente): void {
+            $expediente = Expediente::query()->whereKey($expediente->id)->lockForUpdate()->firstOrFail();
+            $this->authorize('eliminarDefinitivo', $expediente);
+
+            foreach ([
+                'archivos',
+                'cartas_vrin',
+                'documentos_generados',
+                'expediente_articulos',
+                'observaciones',
+                'rendiciones',
+                'resoluciones',
+                'respuestas_opp',
+                'validaciones_calidad',
+            ] as $tabla) {
+                DB::table($tabla)->where('expediente_id', $expediente->id)->delete();
+            }
+
+            $expediente->forceDelete();
+        });
 
         return response()->noContent();
     }

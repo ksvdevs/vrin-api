@@ -56,6 +56,7 @@ class ExpedienteService
         }
 
         return DB::transaction(function () use ($datos, $docente, $usuario) {
+            $docente = Docente::query()->whereKey($docente->id)->lockForUpdate()->firstOrFail();
             // Snapshot del docente (grado/contrato/escuela se congelan aquí).
             // RN-12: sin documentos completos el expediente nace OBSERVADO.
             $expediente = Expediente::create([

@@ -13,6 +13,13 @@ class DocenteRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        if (is_string($this->input('email'))) {
+            $this->merge(['email' => mb_strtolower(trim($this->input('email')))]);
+        }
+    }
+
     public function rules(): array
     {
         return [
@@ -34,7 +41,15 @@ class DocenteRequest extends FormRequest
             ],
             'categoria' => [$this->isMethod('post') ? 'required' : 'nullable', Rule::in(['ORDINARIO_PRINCIPAL', 'ORDINARIO_ASOCIADO', 'ORDINARIO_AUXILIAR', 'CONTRATADO'])],
             'escuela_id' => ['required', 'integer', Rule::exists('escuelas', 'id')],
-            'email' => [$this->isMethod('post') ? 'required' : 'nullable', 'email', 'max:190'],
+            'email' => [
+                $this->isMethod('post') ? 'required' : 'nullable',
+                'email',
+                'max:190',
+                ...($this->isMethod('post') ||
+                    mb_strtolower((string) $this->input('email')) !== mb_strtolower((string) $this->route('docente')?->email)
+                    ? [Rule::unique('docentes', 'email')->withoutTrashed()->ignore($this->route('docente'))]
+                    : []),
+            ],
             'activo' => [$this->isMethod('post') ? 'required' : 'sometimes', 'boolean'],
         ];
     }
@@ -58,6 +73,7 @@ class DocenteRequest extends FormRequest
             'escuela_id.exists' => 'La escuela seleccionada no existe.',
             'email.email' => 'El correo electrónico no tiene un formato válido.',
             'email.required' => 'El email es obligatorio.',
+            'email.unique' => 'Este correo electrónico ya está registrado por otro docente.',
             'activo.required' => 'El estado es obligatorio.',
         ];
     }

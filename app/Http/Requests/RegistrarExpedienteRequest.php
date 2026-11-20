@@ -18,7 +18,7 @@ class RegistrarExpedienteRequest extends FormRequest
         return [
             'carta_docente_numero' => ['required', 'string', 'max:80'], // sin el prefijo «CARTA N°»
             'carta_docente_registro_numero' => ['required', 'string', 'max:80'],
-            'carta_docente_registro_fecha' => ['required', 'date'],
+            'carta_docente_registro_fecha' => ['required', 'date', 'after_or_equal:carta_docente_fecha'],
             'carta_docente_fecha' => ['required', 'date'],
             'docente_id' => ['required', 'integer', Rule::exists('docentes', 'id')],
             // grado, tipo_contrato y escuela_id NO se piden: se toman del docente (snapshot)
@@ -43,6 +43,7 @@ class RegistrarExpedienteRequest extends FormRequest
             'carta_docente_registro_numero.max' => 'El registro de la carta no puede superar los 80 caracteres.',
             'carta_docente_registro_fecha.required' => 'La fecha de registro de la carta del docente es obligatoria.',
             'carta_docente_registro_fecha.date' => 'La fecha de registro de la carta del docente no es válida.',
+            'carta_docente_registro_fecha.after_or_equal' => 'La fecha de registro de la carta del docente debe ser igual o posterior a la fecha de la carta.',
             'carta_docente_fecha.required' => 'La fecha de la carta del docente es obligatoria.',
             'carta_docente_fecha.date' => 'La fecha de la carta del docente no es válida.',
             'docente_id.required' => 'El docente es obligatorio.',

@@ -2,10 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\DesembolsoActualizado;
 use App\Models\Expediente;
 use App\Services\ExpedienteWorkflow;
+use App\Services\PlazoRendicionService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -30,6 +33,70 @@ class RendicionController extends Controller
             'etapa_actual' => $expediente->etapa_actual,
             'rendicion' => $expediente->rendicion,
         ], 201);
+    }
+
+    public function actualizarDesembolso(Request $request, Expediente $expediente, PlazoRendicionService $plazos): JsonResponse
+    {
+        $this->authorize('actualizarDesembolso', $expediente);
+
+        $payload = $request->validate([
+            'fecha_desembolso' => ['required', 'date'],
+            'monto_desembolsado' => ['required', 'numeric', 'gt:0', 'max:9999999999.99'],
+        ]);
+
+        $actualizado = DB::transaction(function () use ($expediente, $request, $payload, $plazos) {
+            $expediente = Expediente::query()->lockForUpdate()->findOrFail($expediente->id);
+            abort_unless(in_array($expediente->estado, ['POR_RENDIR', 'RENDICION_VENCIDA'], true), 409, 'La rendición ya está cerrada o aún no tiene desembolso.');
+
+            $rendicion = $expediente->rendicion()->lockForUpdate()->firstOrFail();
+            abort_unless($rendicion->estado === 'BORRADOR', 409, 'La rendición ya está cerrada.');
+
+            $antes = [
+                'fecha_desembolso' => $rendicion->fecha_desembolso->format('Y-m-d'),
+                'monto_desembolsado' => $rendicion->monto_desembolsado,
+                'fecha_limite' => $rendicion->fecha_limite->format('Y-m-d'),
+                'estado' => $expediente->estado,
+            ];
+
+            $fechaDesembolso = Carbon::parse($payload['fecha_desembolso']);
+            $fechaLimite = $plazos->calcularFechaLimite($fechaDesembolso);
+            $nuevoEstado = $fechaLimite->lt(Carbon::today()) ? 'RENDICION_VENCIDA' : 'POR_RENDIR';
+
+            $rendicion->update([
+                'fecha_desembolso' => $fechaDesembolso->format('Y-m-d'),
+                'monto_desembolsado' => $payload['monto_desembolsado'],
+                'fecha_limite' => $fechaLimite->format('Y-m-d'),
+            ]);
+
+            if ($expediente->estado !== $nuevoEstado) {
+                $expediente->update(['estado' => $nuevoEstado]);
+                if ($nuevoEstado === 'POR_RENDIR') {
+                    $expediente->observaciones()->where('origen', 'SISTEMA')->where('etapa', 4)
+                        ->whereNull('resuelta_at')->update(['resuelta_at' => now()]);
+                } else {
+                    $expediente->observaciones()->create([
+                        'etapa' => 4,
+                        'origen' => 'SISTEMA',
+                        'texto' => 'La fecha límite de rendición ha vencido tras corregir la fecha de desembolso.',
+                        'creada_por' => $request->user()->id,
+                    ]);
+                }
+            }
+
+            event(new DesembolsoActualizado($expediente, $request->user(), $antes, [
+                'fecha_desembolso' => $fechaDesembolso->format('Y-m-d'),
+                'monto_desembolsado' => $rendicion->monto_desembolsado,
+                'fecha_limite' => $fechaLimite->format('Y-m-d'),
+                'estado' => $nuevoEstado,
+            ]));
+
+            return $rendicion;
+        });
+
+        return response()->json([
+            'estado' => $actualizado->expediente->estado,
+            'rendicion' => $actualizado->refresh(),
+        ]);
     }
 
     public function actualizarFechaLimite(Request $request, Expediente $expediente)

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\DocenteRequest;
 use App\Models\Docente;
+use App\Models\DocenteHistorico;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
@@ -63,6 +64,7 @@ class DocenteController extends Controller
 
         $docentes = Docente::query()
             ->with(['escuela.facultad'])
+            ->withExists(['expedientes as tiene_expedientes' => fn ($query) => $query->withTrashed()])
             ->when(! empty($filtros['busqueda']), function ($query) use ($filtros) {
                 foreach (preg_split('/\s+/u', trim($filtros['busqueda']), -1, PREG_SPLIT_NO_EMPTY) as $termino) {
                     $like = '%'.addcslashes($termino, '%_').'%';
@@ -80,6 +82,17 @@ class DocenteController extends Controller
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->paginate(15);
+
+        $dnisConHistorial = DB::table('docentes_historicos')
+            ->join('expedientes', 'expedientes.docente_id', '=', 'docentes_historicos.id')
+            ->whereIn('docentes_historicos.dni', $docentes->getCollection()->pluck('dni'))
+            ->distinct()
+            ->pluck('docentes_historicos.dni')
+            ->all();
+        foreach ($docentes->getCollection() as $docente) {
+            $docente->tiene_expedientes = (bool) $docente->tiene_expedientes
+                || in_array($docente->dni, $dnisConHistorial, true);
+        }
 
         return response()->json($docentes);
     }
@@ -138,11 +151,15 @@ class DocenteController extends Controller
                 $eliminado->fill($datos);
                 $eliminado->created_at = now();
                 $eliminado->save();
+                DocenteHistorico::sincronizar($eliminado);
 
                 return $eliminado;
             }
 
-            return Docente::create($datos);
+            $docente = Docente::create($datos);
+            DocenteHistorico::sincronizar($docente);
+
+            return $docente;
         });
 
         return response()->json($docente->load('escuela.facultad'), 201);
@@ -159,7 +176,10 @@ class DocenteController extends Controller
         if (isset($datos['categoria'])) {
             $datos['tipo_contrato'] = $datos['categoria'] === 'CONTRATADO' ? 'CONTRATADO' : 'NOMBRADO';
         }
-        $docente->update($datos);
+        DB::transaction(function () use ($docente, $datos): void {
+            $docente->update($datos);
+            DocenteHistorico::sincronizar($docente);
+        });
 
         return response()->json($docente->refresh()->load('escuela.facultad'));
     }
@@ -169,20 +189,33 @@ class DocenteController extends Controller
         $this->authorize('update', $docente);
 
         $datos = $request->validate(['activo' => ['required', 'boolean']]);
-        $docente->update($datos);
+        DB::transaction(function () use ($docente, $datos): void {
+            $docente->update($datos);
+            DocenteHistorico::sincronizar($docente);
+        });
 
         return response()->json($docente->refresh()->load('escuela.facultad'));
     }
 
     public function destroy(Docente $docente)
     {
-        if ($docente->expedientes()->withTrashed()->exists()) {
-            return response()->json([
-                'message' => 'El docente tiene expedientes registrados. Desactívalo desde Modificar docente.',
-            ], 409);
-        }
+        DB::transaction(function () use ($docente): void {
+            $docente = Docente::query()->whereKey($docente->id)->lockForUpdate()->firstOrFail();
+            $historicosDelDni = DocenteHistorico::withTrashed()
+                ->where('dni', $docente->dni)
+                ->select('id');
+            abort_if(
+                DB::table('expedientes')
+                    ->where('docente_id', $docente->id)
+                    ->orWhereIn('docente_id', $historicosDelDni)
+                    ->exists(),
+                409,
+                'El docente tiene expedientes registrados. Desactívalo desde Modificar docente.',
+            );
 
-        $docente->forceDelete();
+            $docente->forceDelete();
+            DocenteHistorico::withTrashed()->whereKey($docente->id)->forceDelete();
+        });
 
         return response()->json(null, 204);
     }

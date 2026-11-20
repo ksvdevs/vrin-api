@@ -54,6 +54,11 @@ class RegistroCartaDocenteTest extends TestCase
         $datos['carta_docente_registro_numero'] = '1392-2026';
         $this->assertTrue(Validator::make($datos, $reglas)->passes());
 
+        $fechaAnterior = [...$datos, 'carta_docente_registro_fecha' => '2026-07-21'];
+        $this->assertTrue(Validator::make($fechaAnterior, $reglas)->errors()->has('carta_docente_registro_fecha'));
+        $mismaFecha = [...$datos, 'carta_docente_registro_fecha' => '2026-07-22'];
+        $this->assertTrue(Validator::make($mismaFecha, $reglas)->passes());
+
         $sinFecha = $datos;
         unset($sinFecha['carta_docente_registro_fecha']);
         $this->assertTrue(Validator::make($sinFecha, $reglas)->errors()->has('carta_docente_registro_fecha'));
